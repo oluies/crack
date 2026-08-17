@@ -1,50 +1,96 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# Crack Constitution
+
+Governing principles for `crack` — a static site charting diesel crack spreads and
+European/US retail fuel prices. These rules bind every feature spec, plan, and
+implementation in this repository.
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Static by Construction
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+The published artefact is a directory of files. No server, no runtime database, no
+API call from the browser to anything but the site's own origin. Every number the
+page renders is baked into a JSON file at build time. This is not a performance
+preference — it is what makes the site free to host, trivially archivable, and
+immune to an upstream API outage taking the charts down.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+Consequence: any feature that would require a request at page-load time is out of
+scope until the constitution is amended.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### II. SQL Is the Pipeline
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+Data acquisition, reshaping, and aggregation live in DuckDB SQL under `pipeline/`.
+Shell exists only to sequence SQL scripts and to move bytes that DuckDB cannot fetch
+itself. Python is permitted only where DuckDB genuinely cannot do the job, and every
+such use must carry a comment naming the specific limitation.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+The SQL is idiomatic DuckDB — `read_json_auto`, `read_xlsx`, `UNPIVOT ... ON
+COLUMNS(*)`, `QUALIFY`, `EXCLUDE`/`REPLACE`. Do not hand-roll in a scripting
+language what a DuckDB idiom already expresses.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### III. Provenance Is Part of the Data
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Every published series states where it came from, under what licence, and when it
+was last refreshed. A number whose origin cannot be named does not ship. Derived
+series (crack spreads, currency conversions) state their formula in the same place
+the number is documented.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+Where a source is unavailable — as ICE gasoil futures are, having no free API — the
+gap is documented as a gap, backed by an explicit manually maintained file, and
+surfaced in the UI as such. A stub is honest; a silently interpolated series is not.
+
+### IV. Minimal Frontend Surface
+
+The frontend is Scala 3 / Scala.js / Laminar, built with Mill. ECharts arrives from
+a CDN and is reached through a hand-written `js.native` facade covering only the
+methods actually called. No ScalablyTyped, no bundler, no npm dependency graph.
+
+New facade members are added when a chart needs them, never speculatively. If the
+facade grows past what one screen of code can hold, that is a signal to reconsider,
+not to generate bindings.
+
+### V. Reproducible Refresh
+
+`pipeline/run.sh` is the single entry point and is idempotent: running it twice
+against the same upstream data produces byte-identical output. Timestamps that would
+break this belong in a separate metadata field, not interleaved with observations.
+The weekly GitHub Actions job runs exactly this script — CI has no privileged path
+that a developer cannot reproduce locally with an API key.
+
+## Data Integrity Constraints
+
+- **Units are explicit and normalised at the pipeline boundary.** Oil Bulletin
+  prices arrive as EUR per 1000 litres and are stored as EUR/L. EIA retail prices
+  arrive as USD/gal. Crack spreads are USD/bbl. A column name carries its unit.
+- **Weekly means weekly.** Sources publish on different weekdays; observations are
+  keyed to the ISO week and the representative date is that week's Monday.
+  Cross-source joins happen on the week key, never on the raw publication date.
+- **Currency conversion is a presentation concern.** Series are stored in their
+  native currency alongside the ECB reference rates for the same week; the frontend
+  converts. This keeps one source of truth and makes the EUR/USD/SEK toggle exact
+  rather than three separately rounded pipelines.
+- **Missing is null, never zero and never carried forward.** Gaps render as gaps.
+
+## Development Workflow
+
+- Work proceeds through Spec Kit: constitution → `spec.md` → `plan.md` →
+  `tasks.md` → implementation. Specs describe observable behaviour and data
+  contracts, not code structure.
+- Every commit is reviewed by `roborev` before the feature branch merges. Findings
+  are resolved or explicitly waived with a reason recorded in the review.
+- CI runs on push: Mill compile of the Scala.js app, and a pipeline dry run against
+  fixtures so a broken SQL script fails before the weekly cron does.
+- The weekly cron commits refreshed JSON. A refresh that produces no diff commits
+  nothing.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes convenience. Where a plan conflicts with it, the plan
+changes or the constitution is amended in the same pull request that departs from
+it — never silently.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+Amendments record what changed and why. Complexity that is not demanded by a
+principle above must be justified in the plan's Complexity Tracking section or
+removed.
+
+**Version**: 1.0.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-17

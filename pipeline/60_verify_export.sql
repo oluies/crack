@@ -18,9 +18,9 @@
 --    names a column rather than the problem. Probing the raw JSON first binds
 --    regardless of content, so a malformed file gets a diagnosis instead.
 CREATE OR REPLACE TEMP TABLE published AS
-SELECT 'cracks.json' AS f, json FROM read_json_objects('site/public/data/cracks.json')
-UNION ALL SELECT 'retail.json', json FROM read_json_objects('site/public/data/retail.json')
-UNION ALL SELECT 'fx.json',     json FROM read_json_objects('site/public/data/fx.json');
+SELECT 'cracks.json' AS f, json FROM read_json_objects(getvariable('out_dir') || '/cracks.json')
+UNION ALL SELECT 'retail.json', json FROM read_json_objects(getvariable('out_dir') || '/retail.json')
+UNION ALL SELECT 'fx.json',     json FROM read_json_objects(getvariable('out_dir') || '/fx.json');
 
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 8: {} published file(s) have the wrong shape: {}',
@@ -33,6 +33,21 @@ FROM (
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
       WHEN f <> 'fx.json' AND json_type(json->'$.series') IS DISTINCT FROM 'ARRAY'
         THEN 'series is not an array'
+      WHEN f <> 'fx.json' AND json_array_length(json->'$.series') = 0
+        THEN 'series is empty'
+      -- Element keys, not just the top level. read_json unifies the struct
+      -- schema across list elements, so a key absent from EVERY element leaves
+      -- the inferred struct without that field and s.values fails to BIND —
+      -- the binder-error-instead-of-diagnosis outcome this check exists to
+      -- prevent. Probing element 0 catches it here, with a message.
+      WHEN f = 'cracks.json' AND (json_type(json->'$.series[0].key')    IS DISTINCT FROM 'VARCHAR'
+                               OR json_type(json->'$.series[0].values') IS DISTINCT FROM 'ARRAY')
+        THEN 'series elements lack key/values'
+      WHEN f = 'retail.json' AND (json_type(json->'$.series[0].cc')     IS DISTINCT FROM 'VARCHAR'
+                               OR json_type(json->'$.series[0].fuel')   IS DISTINCT FROM 'VARCHAR'
+                               OR json_type(json->'$.series[0].tax')    IS DISTINCT FROM 'VARCHAR'
+                               OR json_type(json->'$.series[0].values') IS DISTINCT FROM 'ARRAY')
+        THEN 'series elements lack cc/fuel/tax/values'
       WHEN f =  'fx.json' AND (json_type(json->'$.rates.USD') IS DISTINCT FROM 'ARRAY'
                             OR json_type(json->'$.rates.SEK') IS DISTINCT FROM 'ARRAY')
         THEN 'rates.USD/SEK is not an array'
@@ -56,7 +71,7 @@ SELECT CASE WHEN count(*) > 0
 END AS "9 cracks.json series aligned"
 FROM (
   SELECT s.key AS key, len(s.values) AS n, len(weeks) AS w
-  FROM (SELECT weeks, unnest(series) AS s FROM read_json('site/public/data/cracks.json'))
+  FROM (SELECT weeks, unnest(series) AS s FROM read_json(getvariable('out_dir') || '/cracks.json'))
 ) WHERE n IS NULL
      OR (n IS DISTINCT FROM w AND NOT (n = 0 AND key = 'nwe_gasoil_brent'));
 
@@ -65,7 +80,7 @@ FROM (
 CREATE OR REPLACE TEMP VIEW allser AS
 SELECT s.cc || '/' || s.fuel || '/' || s.tax AS label,
        len(s.values) AS n, len(weeks) AS w
-FROM (SELECT weeks, unnest(series) AS s FROM read_json('site/public/data/retail.json'));
+FROM (SELECT weeks, unnest(series) AS s FROM read_json(getvariable('out_dir') || '/retail.json'));
 
 CREATE OR REPLACE TEMP VIEW bad AS
 SELECT * FROM allser WHERE n IS NULL OR n IS DISTINCT FROM w;
@@ -75,7 +90,8 @@ SELECT CASE WHEN (SELECT count(*) FROM bad) > 0
                     (SELECT count(*) FROM bad),
                     (SELECT count(*) FROM allser),
                     (SELECT any_value(w) FROM bad),
-                    (SELECT string_agg(label || '=' || n, ', ') FROM (SELECT * FROM bad LIMIT 5))))
+                    (SELECT string_agg(coalesce(label, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')
+                     FROM (SELECT * FROM bad LIMIT 5))))
 END AS "10 retail.json series aligned"
 FROM (SELECT 1);
 
@@ -84,7 +100,7 @@ FROM (SELECT 1);
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 11: fx.json rates are not aligned to weeks ({} problems)', count(*)))
 END AS "11 fx.json rates aligned"
-FROM (SELECT * FROM read_json('site/public/data/fx.json'))
+FROM (SELECT * FROM read_json(getvariable('out_dir') || '/fx.json'))
 -- The NULL cases are tested first and explicitly. 50_export builds these with
 -- list(...) FILTER (WHERE ccy = 'USD'), which yields NULL — not [] — when no row
 -- survives; len(NULL) <> len(weeks) is NULL, so a fx.json with no USD rates at
@@ -101,11 +117,11 @@ WHERE rates.USD IS NULL
 --     IS DISTINCT FROM, not <>: a missing or renamed weeks key gives NULL, and
 --     NULL <> NULL is NULL, so the CASE would fall through to green on a file
 --     with no axis at all.
-SELECT CASE WHEN (SELECT weeks FROM read_json('site/public/data/cracks.json'))
-                 IS DISTINCT FROM (SELECT weeks FROM read_json('site/public/data/retail.json'))
-             OR (SELECT weeks FROM read_json('site/public/data/cracks.json'))
-                 IS DISTINCT FROM (SELECT weeks FROM read_json('site/public/data/fx.json'))
-             OR (SELECT weeks FROM read_json('site/public/data/cracks.json')) IS NULL
+SELECT CASE WHEN (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json'))
+                 IS DISTINCT FROM (SELECT weeks FROM read_json(getvariable('out_dir') || '/retail.json'))
+             OR (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json'))
+                 IS DISTINCT FROM (SELECT weeks FROM read_json(getvariable('out_dir') || '/fx.json'))
+             OR (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json')) IS NULL
   THEN error('verify 12: the three JSON files do not share one week axis')
 END AS "12 shared week axis";
 

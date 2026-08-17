@@ -50,6 +50,14 @@ jobs:
             echo "$f: $(wc -c < "$f") byte"
           done
 
+      # A green happy path only proves the checks did not fire, never that they
+      # could. Three separate commits shipped invariants that were structurally
+      # incapable of failing, and review caught every one of them because CI
+      # could not. This corrupts each input in turn and asserts the run dies
+      # naming the right check.
+      - name: Negative tests — the invariants must be able to fail
+        run: pipeline/test/negative.sh
+
       # Runs the real Scala.js app in jsdom against the just-built data and
       # clicks every toggle. The only test that executes the frontend — it is
       # what caught the unbounded-visualMap crash in the threshold chart.

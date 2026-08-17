@@ -104,14 +104,20 @@ site/         index.html, the Scala.js app, and the published JSON
 specs/        the spec-driven-development artefacts
 ```
 
-`pipeline/verify.sql` is the real test suite. It asserts the invariants that catch
-the failures which produce a *plausible but wrong* chart — a dropped ×42 on the
-crack, an exchange rate applied twice — because those do not announce themselves.
+`pipeline/verify.sql` and `pipeline/60_verify_export.sql` are the real test suite.
+They assert the invariants that catch failures producing a *plausible but wrong*
+chart — a dropped ×42 on the crack, an exchange rate applied twice — because those
+do not announce themselves.
+
+`pipeline/test/negative.sh` tests the tests: it corrupts each input in turn and
+asserts the run dies naming the right check. A check that cannot fail is worse
+than no check, because it reports green and is believed.
 
 ## Automation
 
 - `.github/workflows/ci.yml` — on push and pull request: compile the frontend, run
-  the pipeline against fixtures.
+  the pipeline against fixtures, run the negative tests, and run the headless
+  frontend smoke test.
 - `.github/workflows/refresh.yml` — weekly: run the pipeline for real, commit
   changed JSON, build, and deploy to Pages. A run that changes nothing commits
   nothing.

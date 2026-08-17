@@ -16,7 +16,10 @@ CREATE SCHEMA IF NOT EXISTS stg;
 -- database an earlier invocation built, so deriving it from the current
 -- invocation's mode would fail a fixtures build the moment it was re-verified.
 CREATE OR REPLACE TABLE stg.build_meta AS
-SELECT getvariable('strict')::BOOLEAN AS strict;
+-- coalesce to true: an unset variable yields NULL, and `CASE WHEN NULL AND ...`
+-- is NULL, which reports green. The default has to be "do check it" — this is
+-- the same fail-open-on-NULL class the export checks close with IS DISTINCT FROM.
+SELECT coalesce(getvariable('strict')::BOOLEAN, true) AS strict;
 
 -- ---------------------------------------------------------------------------
 -- Week axis

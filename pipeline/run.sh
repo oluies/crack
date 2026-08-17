@@ -167,6 +167,7 @@ SET VARIABLE ob_path    = '$OB_PATH';
 SET VARIABLE start_week = '$START_WEEK';
 SET VARIABLE generated  = '$(date -u +%Y-%m-%d)';
 SET VARIABLE strict     = $STRICT;
+SET VARIABLE out_dir    = '$ROOT/site/public/data';
 SQL
 
 if [ "$MODE" = "verify" ]; then

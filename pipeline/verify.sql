@@ -33,17 +33,31 @@ SELECT CASE WHEN count(*) > 0
 END AS "2a EIA spot rows unique"
 FROM (SELECT 1 FROM stg.spot_daily GROUP BY obs_date, series_id HAVING count(*) > 1);
 
-SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 2b: {} (week, cc, fuel, tax) group(s) have more than one Oil Bulletin observation', count(*)))
-END AS "2b Oil Bulletin one row per week"
-FROM (SELECT 1 FROM stg.ob_parsed
-      GROUP BY date_trunc('week', obs_date), cc, fuel, tax HAVING count(*) > 1);
+-- Namngivna vyer så att felmeddelandet kan peka ut vilka grupper som brast;
+-- ett antal utan nycklar ger operatören ingenting att titta på.
+CREATE OR REPLACE TEMP VIEW dup2b AS
+SELECT date_trunc('week', obs_date)::DATE || '/' || cc || '/' || fuel || '/' || tax AS k
+FROM stg.ob_parsed
+GROUP BY date_trunc('week', obs_date), cc, fuel, tax HAVING count(*) > 1;
+
+CREATE OR REPLACE TEMP VIEW dup2c AS
+SELECT date_trunc('week', obs_date)::DATE || '/' || fuel AS k
+FROM stg.retail_us_raw
+GROUP BY date_trunc('week', obs_date), fuel HAVING count(*) > 1;
 
 SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 2c: {} (week, fuel) group(s) have more than one EIA retail publication', count(*)))
+  THEN error(format('verify 2b: {} (week, cc, fuel, tax) group(s) have more than one '
+                    'Oil Bulletin observation; first: {}',
+                    count(*), (SELECT string_agg(k, ', ') FROM (SELECT k FROM dup2b LIMIT 5))))
+END AS "2b Oil Bulletin one row per week"
+FROM dup2b;
+
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 2c: {} (week, fuel) group(s) have more than one EIA retail '
+                    'publication; first: {}',
+                    count(*), (SELECT string_agg(k, ', ') FROM (SELECT k FROM dup2c LIMIT 5))))
 END AS "2c EIA retail one row per week"
-FROM (SELECT 1 FROM stg.retail_us_raw
-      GROUP BY date_trunc('week', obs_date), fuel HAVING count(*) > 1);
+FROM dup2c;
 
 -- 3. All 27 members present in the most recent week that has any EU data.
 --    Catches a country quietly dropping out of the workbook.
@@ -108,7 +122,7 @@ FROM (
 --    Check 7b (EU retail) is NOT gated — the Oil Bulletin is fetched live in
 --    every mode, so a workbook that still parses but has stopped being updated
 --    must fail CI rather than sail through it.
-SELECT CASE WHEN (SELECT strict FROM stg.build_meta) AND (SELECT max(week_start) FROM stg.week_calendar)
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.crack_weekly
                              WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 14
   THEN error(format('verify 7: crack data stale - calendar ends {}, last observation {}',

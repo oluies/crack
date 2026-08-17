@@ -161,6 +161,19 @@ Each assertion fails the run with a message naming what broke.
 11. `fx.json` rates are aligned to `weeks[]` **and** contain no nulls.
 12. All three files share one week axis.
 
+## Testing the invariants
+
+`pipeline/test/negative.sh` corrupts each input in turn and asserts the run exits
+non-zero **and** names the expected check — plus one case asserting the strict
+gate stays silent when it should.
+
+It exists because three consecutive commits shipped invariants that could not
+fire: uniqueness asserted on tables whose own `GROUP BY` produced the key; then
+the same checks on the raw table but keyed on the raw date, so two publications
+in one week still passed; then four export checks returning green on NULL. Review
+caught all three; the build caught none, because it only ever ran the happy path.
+A green happy path proves the checks did not fire, never that they could.
+
 Comparisons use `IS DISTINCT FROM`, not `<>`. These checks reject malformed
 input, and `NULL <> NULL` is `NULL` — the ordinary operator makes every one of
 them fail open on precisely the input it exists to catch.

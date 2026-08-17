@@ -11,6 +11,13 @@ INSTALL excel;  LOAD excel;
 -- wondering which tables are inputs and which are products.
 CREATE SCHEMA IF NOT EXISTS stg;
 
+-- Strictness is recorded in the database at build time, not read from the
+-- variable at check time. --verify-only re-runs the invariants against a
+-- database an earlier invocation built, so deriving it from the current
+-- invocation's mode would fail a fixtures build the moment it was re-verified.
+CREATE OR REPLACE TABLE stg.build_meta AS
+SELECT getvariable('strict')::BOOLEAN AS strict;
+
 -- ---------------------------------------------------------------------------
 -- Week axis
 --

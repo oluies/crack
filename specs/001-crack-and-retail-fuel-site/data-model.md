@@ -116,11 +116,16 @@ Each assertion fails the run with a message naming what broke.
 ### Staging (`verify.sql`, before export)
 
 1. `week_calendar` has no gaps — consecutive Mondays, 7 days apart throughout.
-2. No duplicate rows **in the pre-aggregation tables**: `(obs_date, series_id)` in
-   `spot_daily` and `retail_us_raw`, `(obs_date, cc, fuel, tax)` in `ob_parsed`.
-   These must target the raw rows. Asserting uniqueness on a weekly table whose
-   own `GROUP BY` produces that key is tautological — it reports green on exactly
-   the upstream double-publication it claims to catch.
+2. No duplicate rows in the pre-aggregation tables, **grouped by the key those
+   tables are later aggregated on**: `(week, fuel)` over `retail_us_raw`,
+   `(week, cc, fuel, tax)` over `ob_parsed`, and `(obs_date, series_id)` over
+   `spot_daily` — the last is the exception, because that table is genuinely
+   daily and its weekly mean is deliberate.
+   Two mistakes are possible here and both were made in turn. Asserting on the
+   weekly table is tautological: its own `GROUP BY` produces the key. Asserting
+   on the raw table but by the *raw* key is no better — two publications in the
+   same week carry different dates, pass a `(date, …)` check, and are silently
+   averaged by the very `GROUP BY` downstream that the check exists to police.
 3. All 27 EU members present in the latest published week for with-tax diesel.
 4. Swedish with-tax diesel lies in 1.0–3.0 EUR/L across the whole range — catches a
    reintroduced exchange-rate multiplication.
@@ -128,21 +133,39 @@ Each assertion fails the run with a message naming what broke.
    tight enough to catch a unit error such as omitting the ×42.
 6. `fx_weekly` covers every calendar week for both currencies.
 7. No long trailing run of empty weeks — data has not gone stale upstream.
-   **Live runs only.** Fixtures are a frozen snapshot while `week_calendar`
-   tracks `current_date`, so this would start failing every CI run weeks after
-   the fixtures were generated, blocking pull requests for an unrelated reason.
-   `run.sh` sets `strict=false` in fixtures mode.
+   Check 7 (crack) is **live runs only**: under `--fixtures` the EIA half is a
+   frozen synthetic snapshot while `week_calendar` tracks `current_date`, so it
+   would start failing every CI run weeks after the fixtures were generated,
+   blocking pull requests for an unrelated reason.
+   Check 7b (EU retail) is **not** gated — the Oil Bulletin is fetched live in
+   every mode, so a workbook that still parses but has stopped being updated
+   must fail CI rather than sail through it.
+   Strictness is recorded in `stg.build_meta` at build time, not read from the
+   current invocation: `--verify-only` re-checks a database an earlier run
+   built, and deriving it from the current mode failed a fixtures build the
+   moment it was re-verified.
 
 ### Published JSON (`60_verify_export.sql`, after export)
 
 `verify.sql` cannot see these — it runs against staging, before the files exist.
 
-8. Every series in `cracks.json` is aligned to `weeks[]`, or empty (the ICE stub).
-9. Every series in `retail.json` is aligned to `weeks[]`.
-10. `fx.json` rates are aligned to `weeks[]` **and** contain no nulls.
-11. All three files share one week axis.
+8. All three files are well-formed — `weeks` and `series`/`rates.*` are arrays,
+   `meta` an object. Probed on the raw JSON, and deliberately first: every check
+   below reads through `read_json`, whose inferred schema depends on content, so
+   a missing key or an all-null array makes the *column* unbindable and yields a
+   binder error naming a column instead of the problem.
+9. Every series in `cracks.json` is aligned to `weeks[]`. The empty exemption
+   applies **only** to `nwe_gasoil_brent`, the declared ICE stub — a blanket
+   "or empty" would let Brent, WTI and ULSD all come back empty and still pass.
+10. Every series in `retail.json` is aligned to `weeks[]`.
+11. `fx.json` rates are aligned to `weeks[]` **and** contain no nulls.
+12. All three files share one week axis.
 
-Checks 8–11 exist because the wide-form contract is entirely positional and the
+Comparisons use `IS DISTINCT FROM`, not `<>`. These checks reject malformed
+input, and `NULL <> NULL` is `NULL` — the ordinary operator makes every one of
+them fail open on precisely the input it exists to catch.
+
+Checks 8–12 exist because the wide-form contract is entirely positional and the
 frontend indexes without bounds checks: `Fx.convert` reads `usd(i)` for an `i`
 originating in a retail series. A short array throws mid-render and blanks every
 chart; a merely shifted one draws the wrong year and looks fine.

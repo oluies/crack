@@ -9,16 +9,56 @@
 --
 -- Contract: specs/001-crack-and-retail-fuel-site/contracts/chart-json.md
 
--- 8. Every series in cracks.json and retail.json is either aligned to weeks[]
---    or deliberately empty (the ICE gasoil stub).
+-- 8. Shape first, on the raw JSON.
+--
+--    Every check below reads the files through read_json, whose inferred schema
+--    depends on the content: a missing "weeks" key makes the column unbindable
+--    and a null rates.USD makes list_filter unbindable. Those still fail the run
+--    — .bail on sees a non-zero exit — but they fail with a binder error that
+--    names a column rather than the problem. Probing the raw JSON first binds
+--    regardless of content, so a malformed file gets a diagnosis instead.
+CREATE OR REPLACE TEMP TABLE published AS
+SELECT 'cracks.json' AS f, json FROM read_json_objects('site/public/data/cracks.json')
+UNION ALL SELECT 'retail.json', json FROM read_json_objects('site/public/data/retail.json')
+UNION ALL SELECT 'fx.json',     json FROM read_json_objects('site/public/data/fx.json');
+
 SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 8: {} series in cracks.json are misaligned: {}',
-                    count(*), string_agg(key || '=' || n, ', ')))
-END AS "8 cracks.json series aligned"
+  THEN error(format('verify 8: {} published file(s) have the wrong shape: {}',
+                    count(*), string_agg(f || ' (' || why || ')', '; ')))
+END AS "8 published files well-formed"
+FROM (
+  SELECT f,
+    CASE
+      WHEN json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
+      WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
+      WHEN f <> 'fx.json' AND json_type(json->'$.series') IS DISTINCT FROM 'ARRAY'
+        THEN 'series is not an array'
+      WHEN f =  'fx.json' AND (json_type(json->'$.rates.USD') IS DISTINCT FROM 'ARRAY'
+                            OR json_type(json->'$.rates.SEK') IS DISTINCT FROM 'ARRAY')
+        THEN 'rates.USD/SEK is not an array'
+    END AS why
+  FROM published
+) WHERE why IS NOT NULL;
+
+-- 9. Every series in cracks.json is aligned to weeks[].
+--
+--    The empty exemption applies ONLY to the declared ICE gasoil stub. 50_export
+--    emits [] for any series with no observations at all, so a blanket "or empty"
+--    would let Brent, WTI and ULSD all come back empty — an EIA facet rename, a
+--    typo in a series ID, a fetch that returned nothing — and still report green.
+--    That is the exact failure this file exists to close.
+--
+--    n IS NULL is tested explicitly: a series with no values key at all gives
+--    NULL, and NULL <> w is NULL, which would quietly not match.
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 9: {} series in cracks.json are misaligned (weeks={}): {}',
+                    count(*), any_value(w), string_agg(key || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
+END AS "9 cracks.json series aligned"
 FROM (
   SELECT s.key AS key, len(s.values) AS n, len(weeks) AS w
   FROM (SELECT weeks, unnest(series) AS s FROM read_json('site/public/data/cracks.json'))
-) WHERE n <> w AND n <> 0;
+) WHERE n IS NULL
+     OR (n IS DISTINCT FROM w AND NOT (n = 0 AND key = 'nwe_gasoil_brent'));
 
 -- Exemplen kapas: en misslyckad axel gör alla 110 serier felaktiga, och en
 -- CI-logg med 110 namn i döljer felet i stället för att visa det.
@@ -27,35 +67,46 @@ SELECT s.cc || '/' || s.fuel || '/' || s.tax AS label,
        len(s.values) AS n, len(weeks) AS w
 FROM (SELECT weeks, unnest(series) AS s FROM read_json('site/public/data/retail.json'));
 
-CREATE OR REPLACE TEMP VIEW bad AS SELECT * FROM allser WHERE n <> w;
+CREATE OR REPLACE TEMP VIEW bad AS
+SELECT * FROM allser WHERE n IS NULL OR n IS DISTINCT FROM w;
 
 SELECT CASE WHEN (SELECT count(*) FROM bad) > 0
-  THEN error(format('verify 9: {} of {} series in retail.json are misaligned (weeks={}); first: {}',
+  THEN error(format('verify 10: {} of {} series in retail.json are misaligned (weeks={}); first: {}',
                     (SELECT count(*) FROM bad),
                     (SELECT count(*) FROM allser),
                     (SELECT any_value(w) FROM bad),
                     (SELECT string_agg(label || '=' || n, ', ') FROM (SELECT * FROM bad LIMIT 5))))
-END AS "9 retail.json series aligned"
+END AS "10 retail.json series aligned"
 FROM (SELECT 1);
 
--- 10. FX must be complete, not merely aligned: a null or a short array here
+-- 11. FX must be complete, not merely aligned: a null or a short array here
 --     drops every series the moment a visitor switches currency.
 SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 10: fx.json rates are not aligned to weeks ({} problems)', count(*)))
-END AS "10 fx.json rates aligned"
+  THEN error(format('verify 11: fx.json rates are not aligned to weeks ({} problems)', count(*)))
+END AS "11 fx.json rates aligned"
 FROM (SELECT * FROM read_json('site/public/data/fx.json'))
-WHERE len(rates.USD) <> len(weeks)
-   OR len(rates.SEK) <> len(weeks)
+-- The NULL cases are tested first and explicitly. 50_export builds these with
+-- list(...) FILTER (WHERE ccy = 'USD'), which yields NULL — not [] — when no row
+-- survives; len(NULL) <> len(weeks) is NULL, so a fx.json with no USD rates at
+-- all would otherwise pass this check green.
+WHERE rates.USD IS NULL
+   OR rates.SEK IS NULL
+   OR len(rates.USD) IS DISTINCT FROM len(weeks)
+   OR len(rates.SEK) IS DISTINCT FROM len(weeks)
    OR len(list_filter(rates.USD, x -> x IS NULL)) > 0
    OR len(list_filter(rates.SEK, x -> x IS NULL)) > 0;
 
--- 11. One axis across all three files. The frontend indexes retail values into
+-- 12. One axis across all three files. The frontend indexes retail values into
 --     the FX arrays by position, which is only valid if these are identical.
+--     IS DISTINCT FROM, not <>: a missing or renamed weeks key gives NULL, and
+--     NULL <> NULL is NULL, so the CASE would fall through to green on a file
+--     with no axis at all.
 SELECT CASE WHEN (SELECT weeks FROM read_json('site/public/data/cracks.json'))
-                 <> (SELECT weeks FROM read_json('site/public/data/retail.json'))
+                 IS DISTINCT FROM (SELECT weeks FROM read_json('site/public/data/retail.json'))
              OR (SELECT weeks FROM read_json('site/public/data/cracks.json'))
-                 <> (SELECT weeks FROM read_json('site/public/data/fx.json'))
-  THEN error('verify 11: the three JSON files do not share one week axis')
-END AS "11 shared week axis";
+                 IS DISTINCT FROM (SELECT weeks FROM read_json('site/public/data/fx.json'))
+             OR (SELECT weeks FROM read_json('site/public/data/cracks.json')) IS NULL
+  THEN error('verify 12: the three JSON files do not share one week axis')
+END AS "12 shared week axis";
 
 SELECT 'export-invarianter gröna' AS verify;

@@ -1,0 +1,35 @@
+package build
+
+import mill.*, scalalib.*, scalajslib.*
+
+/**
+ * Scala.js-frontend. Länkar till site/public/app.js som index.html laddar direkt —
+ * ingen bundler, inget npm. ECharts kommer från CDN och nås via den handskrivna
+ * fasaden i app/src/ECharts.scala.
+ */
+object site extends ScalaJSModule {
+  def scalaVersion   = "3.3.4"
+  def scalaJSVersion = "1.19.0"
+
+  def mvnDeps = Seq(mvn"com.raquo::laminar::17.2.0")
+
+  def sources = Task.Sources("app/src")
+
+  def scalacOptions = Seq("-deprecation", "-feature", "-Wunused:all")
+
+  // Task.Command, inte Task: Mill sandboxar vanliga tasks till Task.dest, och
+  // hela poängen här är att skriva till site/public/ som index.html laddar.
+
+  /** Utvecklingslänkning: snabb, oöverskådlig utdata. */
+  def bundleFast() = Task.Command { copyLinked(fastLinkJS().dest.path) }
+
+  /** Produktionslänkning: den som CI och Pages publicerar. */
+  def bundleFull() = Task.Command { copyLinked(fullLinkJS().dest.path) }
+
+  private def copyLinked(linked: os.Path)(using ctx: mill.api.TaskCtx): os.Path = {
+    val out = moduleDir / "public" / "app.js"
+    os.copy.over(linked / "main.js", out, createFolders = true)
+    ctx.log.info(s"skrev $out (${os.size(out)} byte)")
+    out
+  }
+}

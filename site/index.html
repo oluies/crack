@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crack spreads &amp; pump prices</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 0 auto;
+           max-width: 1100px; padding: 0 16px 40px; color: #222; }
+    h1 { font-size: 20px; margin-top: 24px; }
+    h2 { font-size: 15px; color: #555; margin: 28px 0 4px; }
+    p  { line-height: 1.5; }
+    footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid #ddd;
+             font-size: 13px; color: #666; }
+    footer a { color: #36c; }
+    .topnav { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
+              padding: 10px 0 8px; margin-bottom: 4px; border-bottom: 1px solid #e3e8ef;
+              font-size: 14px; }
+    .topnav .brand { font-weight: 600; color: #333; margin-right: 4px; }
+    .topnav a { color: #36c; text-decoration: none; }
+    .topnav a:hover { text-decoration: underline; }
+
+    .notes { margin-top: 32px; background: #f7f9fc; border: 1px solid #e3e8ef;
+             border-radius: 8px; padding: 4px 20px 12px; font-size: 14px;
+             line-height: 1.5; }
+    .notes li { margin: 5px 0; }
+
+    /* Kontrollrad: samma dova ton som elmix zone-picker. */
+    .controls { display: flex; gap: 18px; align-items: center; flex-wrap: wrap;
+                margin: 8px 0 2px; font-size: 14px; }
+    .group { display: flex; gap: 6px; align-items: center; }
+    .group > .lbl { color: #666; }
+    .group button { font: inherit; color: #36c; background: #fff; cursor: pointer;
+                    border: 1px solid #c9d2e0; border-radius: 5px; padding: 2px 9px; }
+    .group button:hover { background: #f3f6fb; }
+    .group button.on { background: #36c; border-color: #36c; color: #fff; cursor: default; }
+    .group input[type=number] { font: inherit; width: 68px; padding: 2px 6px;
+                                border: 1px solid #c9d2e0; border-radius: 5px; }
+    .group input[type=range] { width: 160px; }
+
+    .chart { width: 100%; height: 380px; }
+    .empty { display: flex; align-items: center; justify-content: center;
+             height: 380px; padding: 0 40px; text-align: center; color: #666;
+             background: #f7f9fc; border: 1px dashed #c9d2e0; border-radius: 8px;
+             font-size: 14px; line-height: 1.6; }
+    .empty code { background: #fff; border: 1px solid #e3e8ef; border-radius: 4px;
+                  padding: 1px 5px; }
+    .prov { font-size: 12.5px; color: #777; margin: 6px 0 0; }
+    .prov a { color: #36c; }
+    .loading { color: #888; font-size: 14px; padding: 40px 0; }
+    .failed { color: #c0392b; font-size: 14px; padding: 20px 0; }
+  </style>
+</head>
+<body>
+  <nav class="topnav">
+    <span class="brand">Crack · diesel margins &amp; pump prices</span>
+    <a href="https://github.com/oluies/crack">Source</a>
+    <a href="https://github.com/oluies/crack#data-sources">Data sources</a>
+  </nav>
+  <div id="app"><p class="loading">Loading…</p></div>
+  <footer>© 2026 Örjan Lundberg ·
+    Built with <a href="https://duckdb.org">DuckDB</a>,
+    <a href="https://laminar.dev">Scala.js + Laminar</a> &amp;
+    <a href="https://echarts.apache.org">ECharts</a> ·
+    Data <a href="https://www.eia.gov/opendata/">EIA</a> (public domain) &amp;
+    <a href="https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en">EU Weekly Oil Bulletin</a>
+    (CC BY 4.0)</footer>
+  <script src="public/app.js"></script>
+</body>
+</html>

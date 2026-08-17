@@ -1,0 +1,12 @@
+# ICE Low Sulphur Gasoil futures settlements, USD per tonne.
+#
+# Ships empty on purpose. ICE licenses this data and offers no free API, so the
+# NWE gasoil-vs-Brent crack cannot be built automatically and is not shipped with
+# values here. See the "ICE gasoil" section of the README.
+#
+# If you have licensed access, append rows below and rerun pipeline/run.sh. Daily
+# or weekly rows both work — 40_cracks.sql reduces either to an ISO-week mean.
+#
+#   2026-08-14,712.25
+#
+obs_date,usd_per_tonne

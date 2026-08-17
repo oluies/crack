@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# run.sh — the single entry point for the data pipeline.
+#
+# Downloads the upstream files, then hands them to DuckDB. Shell moves bytes and
+# sequences scripts; every transformation lives in the SQL beside this file.
+#
+#   pipeline/run.sh                 fetch everything, build, verify, export
+#   pipeline/run.sh --offline       reuse data/work/, no network
+#   pipeline/run.sh --fixtures      build from data/fixtures/, no API key needed
+#   pipeline/run.sh --verify-only   re-run the invariants against the existing db
+#
+# Requires: duckdb 1.5+, curl. EIA_API_KEY from the environment or .env.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."          # repo root; the SQL writes to relative paths
+ROOT="$PWD"
+. pipeline/sources.env
+# shellcheck source=/dev/null
+if [ -f .env ]; then . ./.env; fi   # gitignored; convenient place for EIA_API_KEY
+
+WORK="$ROOT/data/work"
+DB="$ROOT/data/work/crack.duckdb"
+MODE="live"
+
+for arg in "$@"; do
+  case "$arg" in
+    --offline)     MODE="offline" ;;
+    --fixtures)    MODE="fixtures" ;;
+    --verify-only) MODE="verify" ;;
+    *) echo "okänd flagga: $arg" >&2; exit 2 ;;
+  esac
+done
+
+# Nedladdningshjälparna ligger i en source:bar fil så att pipeline/test/negative.sh
+# kan pröva omförsökslogiken utan att köra hela pipelinen.
+# shellcheck source=lib/fetch.sh
+. pipeline/lib/fetch.sh
+
+# En enda plats som bestämmer var exporten hamnar. Guarden nedan lovar i sitt
+# felmeddelande att OUT_DIR är ratten — då måste den faktiskt vara det, annars
+# skulle ett byte lämna katalogen oskapad och idempotensjämförelsen längre ner
+# tyst titta i den gamla.
+OUT_DIR="$ROOT/site/public/data"
+
+mkdir -p "$WORK" "$OUT_DIR" data/manual
+
+# Exporten skriver till strängliteraler, verifieringen läser ur out_dir. Kollas
+# före hämtningarna: ett felkonfigurerat par ska inte kosta fyra nedladdningar
+# först. Egen skript-fil så att negative.sh kan bevisa att kontrollen fäller.
+pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
+  || die "exporten och verifieringen pekar på olika kataloger (se ovan)"
+
+case "$MODE" in
+  live)
+    [ -n "${EIA_API_KEY:-}" ] || die "EIA_API_KEY saknas. Hämta en gratis nyckel på
+     https://www.eia.gov/opendata/register.php och exportera den, eller kör
+     pipeline/run.sh --fixtures för att bygga utan nyckel."
+    fetch_eia "$EIA_SPOT_URL"   eia_spot   daily  $EIA_SPOT_SERIES
+    fetch_eia "$EIA_RETAIL_URL" eia_retail weekly $EIA_RETAIL_SERIES
+    fetch_ecb
+    fetch_oilbulletin
+    ;;
+  offline)
+    say "offline — återanvänder $WORK"
+    ;;
+  fixtures)
+    # Bara EIA är nyckelskyddat. Oil Bulletin och ECB hämtas på riktigt även
+    # här, så en roterad Oil-Bulletin-UUID fälls i CI i stället för att smyga
+    # igenom till veckojobbet.
+    say "fixtures — SYNTETISK EIA-data från data/fixtures/, övriga källor live"
+    say "VARNING: crack-serierna blir påhittade. Publicera aldrig detta bygge."
+    rm -f "$WORK"/eia_*.json
+    cp data/fixtures/eia_*.json "$WORK/" || die "EIA-fixtures saknas i data/fixtures/"
+    fetch_ecb
+    fetch_oilbulletin
+    ;;
+  verify)
+    say "verify-only"
+    ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Build
+#
+# One DuckDB session across all scripts, so SET VARIABLE carries. .bail on stops
+# at the first error and the exit status propagates.
+# ---------------------------------------------------------------------------
+
+OB_PATH="$WORK/$OB_FILE"
+
+# Fixtures är en fryst ögonblicksbild medan week_calendar följer current_date.
+# Färskhetskontrollerna i verify.sql skulle därför börja fälla varje CI-körning
+# några veckor efter att fixtures genererades — och blockera varje pull request
+# med ett fel som inte har med ändringen att göra.
+STRICT=true
+if [ "$MODE" = "fixtures" ]; then STRICT=false; fi
+
+cat > "$WORK/preamble.sql" <<SQL
+.bail on
+SET VARIABLE work_dir   = '$WORK';
+SET VARIABLE manual_dir = '$ROOT/data/manual';
+SET VARIABLE ob_path    = '$OB_PATH';
+SET VARIABLE start_week = '$START_WEEK';
+SET VARIABLE generated  = '$(date -u +%Y-%m-%d)';
+SET VARIABLE strict     = $STRICT;
+SET VARIABLE out_dir    = '$OUT_DIR';
+SQL
+
+if [ "$MODE" = "verify" ]; then
+  say "kör invarianter"
+  duckdb "$DB" -f "$WORK/preamble.sql" \
+    -f pipeline/verify.sql -f pipeline/60_verify_export.sql
+  exit $?
+fi
+
+# Spara föregående utdata för jämförelsen nedan.
+rm -rf "$WORK/prev"; mkdir -p "$WORK/prev"
+cp "$OUT_DIR"/*.json "$WORK/prev/" 2>/dev/null || true
+
+rm -f "$DB"
+say "bygger $DB"
+duckdb "$DB" \
+  -f "$WORK/preamble.sql" \
+  -f pipeline/00_schema.sql \
+  -f pipeline/10_eia.sql \
+  -f pipeline/20_oilbulletin.sql \
+  -f pipeline/30_ecb.sql \
+  -f pipeline/40_cracks.sql \
+  -f pipeline/verify.sql \
+  -f pipeline/50_export.sql \
+  -f pipeline/60_verify_export.sql
+
+# ---------------------------------------------------------------------------
+# Idempotens
+#
+# Konstitutionen kräver att två körningar mot oförändrad uppströmsdata ger
+# identisk utdata — men varje fil bär ett generated-datum som ändras varje gång.
+# Skiljer sig bara det fältet är observationerna oförändrade, och den gamla filen
+# återställs. Utan detta skulle veckojobbet committa tre filer varje vecka även
+# när ingenting nytt publicerats.
+# ---------------------------------------------------------------------------
+undated() { sed -E 's/"generated":"[0-9-]*"/"generated":""/' "$1"; }
+
+for f in "$OUT_DIR"/*.json; do
+  prev="$WORK/prev/$(basename "$f")"
+  if [ -f "$prev" ] && [ "$(undated "$f")" = "$(undated "$prev")" ]; then
+    cp "$prev" "$f"
+    say "$(basename "$f"): oförändrad (bara datumstämpeln rörde sig)"
+  fi
+done
+
+say "klart:"
+ls -l "$OUT_DIR"/*.json >&2

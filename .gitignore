@@ -6,6 +6,9 @@ out/
 site/public/app.js
 site/public/app.js.map
 
+# Dev-only smoke-test deps (the site itself has no npm dependencies)
+site/test/node_modules/
+
 # Pipeline working files
 data/raw/
 data/work/
@@ -18,3 +21,5 @@ data/work/
 
 # OS
 .DS_Store
+# roborev snapshots
+/.roborev/

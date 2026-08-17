@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  FORCE_COLOR: "1"
+
+jobs:
+  build:
+    name: Compile and build from fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.cache/mill
+            out
+          key: mill-${{ runner.os }}-${{ hashFiles('build.mill', 'site/app/src/**') }}
+          restore-keys: mill-${{ runner.os }}-
+
+      - name: Install DuckDB CLI
+        run: |
+          curl -sL https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.zip -o duckdb.zip
+          unzip -q duckdb.zip && sudo mv duckdb /usr/local/bin/ && duckdb --version
+
+      - name: Compile the frontend
+        run: ./mill site.compile
+
+      # Fixtures stand in for the EIA responses, which need a key. The Oil
+      # Bulletin and ECB are keyless and are fetched for real, so a moved
+      # Oil Bulletin UUID fails here rather than silently in the weekly job.
+      - name: Build the pipeline from fixtures
+        run: pipeline/run.sh --fixtures
+
+      - name: Check the exports are non-trivial
+        run: |
+          for f in site/public/data/cracks.json site/public/data/retail.json site/public/data/fx.json; do
+            [ -s "$f" ] || { echo "FEL: $f saknas eller är tom"; exit 1; }
+            echo "$f: $(wc -c < "$f") byte"
+          done
+
+      # A green happy path only proves the checks did not fire, never that they
+      # could. Three separate commits shipped invariants that were structurally
+      # incapable of failing, and review caught every one of them because CI
+      # could not. This corrupts each input in turn and asserts the run dies
+      # naming the right check.
+      - name: Negative tests — the invariants must be able to fail
+        run: pipeline/test/negative.sh
+
+      # Runs the real Scala.js app in jsdom against the just-built data and
+      # clicks every toggle. The only test that executes the frontend — it is
+      # what caught the unbounded-visualMap crash in the threshold chart.
+      - name: Headless smoke test
+        run: |
+          ./mill site.bundleFast
+          cd site/test && npm install --no-audit --no-fund && node smoke.mjs
+
+      # The fixture build writes synthetic crack data into site/public/data.
+      # git checkout alone is not enough — it is a no-op for files that are not
+      # tracked yet — so clean untracked output too.
+      - name: Discard fixture-built data
+        if: always()
+        run: |
+          git checkout -- site/public/data 2>/dev/null || true
+          git clean -fdq site/public/data
+          git status --short -- site/public/data

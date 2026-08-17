@@ -26,7 +26,17 @@ ROOT="$PWD"
 SRC_DB="$ROOT/data/work/crack.duckdb"
 SRC_JSON="$ROOT/site/public/data"
 
-[ -f "$SRC_DB" ] || { echo "FEL: $SRC_DB saknas — kör pipeline/run.sh --fixtures först" >&2; exit 2; }
+die() { echo "FEL: $*" >&2; exit 2; }
+
+# Varje förutsättning kontrolleras med egen diagnos. Utan detta blir ett saknat
+# python3 tio rader "did not fail at all" — alltså exakt den falskt gröna
+# rapporten filen finns för att omöjliggöra.
+[ -f "$SRC_DB" ]               || die "$SRC_DB saknas — kör pipeline/run.sh --fixtures först"
+[ -f "$SRC_JSON/cracks.json" ] || die "$SRC_JSON/cracks.json saknas — kör pipeline/run.sh --fixtures först"
+[ -f "$SRC_JSON/retail.json" ] || die "$SRC_JSON/retail.json saknas"
+[ -f "$SRC_JSON/fx.json" ]     || die "$SRC_JSON/fx.json saknas"
+command -v python3 >/dev/null  || die "python3 krävs för JSON-korruptionerna"
+command -v duckdb  >/dev/null  || die "duckdb krävs"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -34,71 +44,87 @@ mkdir -p "$TMP/data"
 
 pass=0; fail=0
 
-# $1 = case name, $2 = expected substring in stderr, $3 = SQL that corrupts the
-# copy, $4 = which script to run ("verify" | "export")
-expect_fail() {
-  local name="$1" want="$2" corrupt="$3" which="$4"
+# Stämpeln måste matcha den i de exporterade filerna: kontroll 8 avvisar filer
+# som inte skrevs av den här körningen, och proven kör mot kopior av dem.
+GENERATED=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['meta']['generated'])" \
+  "$SRC_JSON/cracks.json") || die "kunde inte läsa meta.generated ur cracks.json"
 
-  cp "$SRC_DB" "$TMP/t.duckdb"
-  rm -rf "$TMP/data"; mkdir -p "$TMP/data"; cp "$SRC_JSON"/*.json "$TMP/data/" 2>/dev/null
-
-  cat > "$TMP/pre.sql" <<SQL
+# Skrivs en gång, inte per prov: ett prov som råkar köra först ska inte avgöra
+# om filen finns.
+cat > "$TMP/pre.sql" <<SQL
 .bail on
 SET VARIABLE work_dir   = '$ROOT/data/work';
 SET VARIABLE manual_dir = '$ROOT/data/manual';
 SET VARIABLE start_week = '2022-01-03';
-SET VARIABLE generated  = '1970-01-01';
+SET VARIABLE generated  = '$GENERATED';
 SET VARIABLE strict     = true;
 SET VARIABLE out_dir    = '$TMP/data';
 SQL
 
-  # Corruption may be SQL (against the copied db) or shell (against the copied
-  # JSON); a leading "!" marks the latter.
+# Återställer en orörd kopia av databasen och de publicerade filerna.
+reset_copy() {
+  cp "$SRC_DB" "$TMP/t.duckdb"
+  rm -rf "$TMP/data"; mkdir -p "$TMP/data"
+  cp "$SRC_JSON"/*.json "$TMP/data/"
+}
+
+# Kör korruptionen och KRÄVER att den lyckades. En korruption som felar lämnar
+# kopian orörd; expect_fail skulle då rapportera "did not fail at all" och
+# expect_pass skulle rapportera grönt — av fel skäl. Det är precis det
+# felläget den här filen finns för att stänga, så det kontrolleras här.
+apply_corruption() {  # $1 = korruption, "!" -> skal mot JSON, annars SQL
+  local corrupt="$1"
   if [ "${corrupt:0:1}" = "!" ]; then
-    ( cd "$TMP/data" && eval "${corrupt:1}" ) || true
+    ( cd "$TMP/data" && eval "${corrupt:1}" )
   else
-    duckdb "$TMP/t.duckdb" -c "$corrupt" >/dev/null 2>&1 || true
+    duckdb "$TMP/t.duckdb" -c "$corrupt" >/dev/null
+  fi
+}
+
+run_checks() {  # $1 = "verify" | "export"
+  local script="pipeline/verify.sql"
+  [ "$1" = "export" ] && script="pipeline/60_verify_export.sql"
+  duckdb "$TMP/t.duckdb" -f "$TMP/pre.sql" -f "$script" 2>&1
+}
+
+# $1 = case name, $2 = expected check ("verify 7"), $3 = corruption,
+# $4 = which script ("verify" | "export")
+expect_fail() {
+  local name="$1" want="$2" corrupt="$3" which="$4" out rc
+
+  reset_copy
+  if ! out=$(apply_corruption "$corrupt" 2>&1); then
+    printf 'FAIL  %-44s corruption itself failed: %s\n' "$name" "$(printf '%s' "$out" | head -1)"
+    fail=$((fail+1)); return
   fi
 
-  local script="pipeline/verify.sql"
-  [ "$which" = "export" ] && script="pipeline/60_verify_export.sql"
-
-  local out
-  out=$(duckdb "$TMP/t.duckdb" -f "$TMP/pre.sql" -f "$script" 2>&1)
-  local rc=$?
+  out=$(run_checks "$which"); rc=$?
 
   if [ $rc -eq 0 ]; then
     printf 'FAIL  %-44s did not fail at all\n' "$name"; fail=$((fail+1))
-  elif ! printf '%s' "$out" | grep -q "$want"; then
-    printf 'FAIL  %-44s failed, but not with "%s"\n      got: %s\n' \
-      "$name" "$want" "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
+  # Kolon i mönstret: annars matchar "verify 1" även verify 10/11/12 och
+  # "verify 7" även 7b, och ett prov kan börja passera på fel kontroll.
+  elif ! printf '%s' "$out" | grep -q "$want:"; then
+    printf 'FAIL  %-44s failed, but not with "%s:"\n      got: %s\n' \
+      "$name" "$want" "$(printf '%s' "$out" | grep -m1 -E 'Error|verify [0-9]' || printf '%s' "$out" | head -1)"
+    fail=$((fail+1))
   else
     printf 'ok    %-44s -> %s\n' "$name" "$want"; pass=$((pass+1))
   fi
 }
 
-# Motsatsen: en korruption som med flit INTE ska fälla.
+# Motsatsen: en korruption som med flit INTE ska fälla. Samma krav på att
+# korruptionen faktiskt gick igenom — annars vore grönt meningslöst.
 expect_pass() {
-  local name="$1" corrupt="$2" which="$3"
+  local name="$1" corrupt="$2" which="$3" out
 
-  cp "$SRC_DB" "$TMP/t.duckdb"
-  rm -rf "$TMP/data"; mkdir -p "$TMP/data"; cp "$SRC_JSON"/*.json "$TMP/data/" 2>/dev/null
+  reset_copy
+  if ! out=$(apply_corruption "$corrupt" 2>&1); then
+    printf 'FAIL  %-44s corruption itself failed: %s\n' "$name" "$(printf '%s' "$out" | head -1)"
+    fail=$((fail+1)); return
+  fi
 
-  cat > "$TMP/pre.sql" <<SQL
-.bail on
-SET VARIABLE work_dir   = '$ROOT/data/work';
-SET VARIABLE manual_dir = '$ROOT/data/manual';
-SET VARIABLE start_week = '2022-01-03';
-SET VARIABLE generated  = '1970-01-01';
-SET VARIABLE strict     = true;
-SET VARIABLE out_dir    = '$TMP/data';
-SQL
-  duckdb "$TMP/t.duckdb" -c "$corrupt" >/dev/null 2>&1 || true
-
-  local script="pipeline/verify.sql"
-  [ "$which" = "export" ] && script="pipeline/60_verify_export.sql"
-
-  if duckdb "$TMP/t.duckdb" -f "$TMP/pre.sql" -f "$script" >/dev/null 2>&1; then
+  if run_checks "$which" >/dev/null 2>&1; then
     printf 'ok    %-44s -> stays green\n' "$name"; pass=$((pass+1))
   else
     printf 'FAIL  %-44s should have stayed green\n' "$name"; fail=$((fail+1))
@@ -142,8 +168,11 @@ expect_fail "crack data gone stale (strict build)" "verify 7" \
   "UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.crack_weekly WHERE week_start > DATE '2026-01-01';" verify
 
-expect_fail "EU retail gone stale" "verify 7b" \
-  "DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
+# SRC_DB kommer från --fixtures, alltså strict=false. Utan detta vore de två
+# 7b-proven identiska och 7b aldrig prövad på ett strikt bygge.
+expect_fail "EU retail gone stale (strict build)" "verify 7b" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 # 7b must fire even on a non-strict build: the Oil Bulletin is live in every mode.
 expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
@@ -185,13 +214,17 @@ expect_fail "a retail series truncated" "verify 10" \
 expect_fail "a null inside fx rates" "verify 11" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"rates\"][\"SEK\"][5]=None;json.dump(d,open(\"fx.json\",\"w\"))"' export
 
+# Kontroll 8 avvisar filer som inte skrevs av den här körningen — det är så
+# kopplingen mellan 50_export.sql:s literala sökvägar och out_dir hålls ärlig.
+expect_fail "an export left over from an earlier run" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"retail.json\"));d[\"meta\"][\"generated\"]=\"1999-01-01\";json.dump(d,open(\"retail.json\",\"w\"))"' export
+
 expect_fail "week axes disagree" "verify 12" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"weeks\"]=[\"1999-01-04\"]+d[\"weeks\"][1:];json.dump(d,open(\"fx.json\",\"w\"))"' export
 
 # --- the happy path must still be green --------------------------------------
 
-cp "$SRC_DB" "$TMP/t.duckdb"
-rm -rf "$TMP/data"; mkdir -p "$TMP/data"; cp "$SRC_JSON"/*.json "$TMP/data/"
+reset_copy
 if duckdb "$TMP/t.duckdb" -f "$TMP/pre.sql" \
      -f pipeline/verify.sql -f pipeline/60_verify_export.sql >/dev/null 2>&1; then
   printf 'ok    %-44s -> green\n' "uncorrupted build passes"; pass=$((pass+1))

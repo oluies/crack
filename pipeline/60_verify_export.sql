@@ -31,6 +31,17 @@ FROM (
     CASE
       WHEN json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
+      -- Reader and writer cannot be pointed at the same place by construction:
+      -- DuckDB's COPY ... TO takes a string LITERAL, so 50_export.sql hardcodes
+      -- site/public/data while these checks read out_dir. They agree only
+      -- because run.sh cd's to the repo root and sets out_dir to match. This
+      -- catches the divergence directly instead: a file this run did not write
+      -- carries a different generated stamp, so a stale or absent export cannot
+      -- be verified green.
+      WHEN json_extract_string(json, '$.meta.generated') IS DISTINCT FROM getvariable('generated')
+        THEN 'not written by this run (generated='
+             || coalesce(json_extract_string(json, '$.meta.generated'), 'NULL')
+             || ', expected ' || getvariable('generated') || ')'
       WHEN f <> 'fx.json' AND json_type(json->'$.series') IS DISTINCT FROM 'ARRAY'
         THEN 'series is not an array'
       WHEN f <> 'fx.json' AND json_array_length(json->'$.series') = 0

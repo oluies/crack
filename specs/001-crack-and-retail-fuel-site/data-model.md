@@ -150,7 +150,8 @@ Each assertion fails the run with a message naming what broke.
 `verify.sql` cannot see these — it runs against staging, before the files exist.
 
 8. All three files are well-formed — `weeks` and `series`/`rates.*` are arrays,
-   `meta` an object. Probed on the raw JSON, and deliberately first: every check
+   `series` non-empty, `meta` an object, and `series[0]` carries the element keys
+   the later checks dereference. Probed on the raw JSON, and deliberately first: every check
    below reads through `read_json`, whose inferred schema depends on content, so
    a missing key or an all-null array makes the *column* unbindable and yields a
    binder error naming a column instead of the problem.
@@ -160,6 +161,14 @@ Each assertion fails the run with a message naming what broke.
 10. Every series in `retail.json` is aligned to `weeks[]`.
 11. `fx.json` rates are aligned to `weeks[]` **and** contain no nulls.
 12. All three files share one week axis.
+
+These checks read through `out_dir` while `50_export.sql` writes to a string
+literal — DuckDB's `COPY ... TO` accepts nothing else there, so the coupling
+cannot be made structural. `run.sh` asserts the two agree before it builds.
+An attempt to catch the divergence in SQL instead, by comparing `meta.generated`
+against the run's stamp, was reverted: it broke `--verify-only` on any later UTC
+day and on any file the idempotence restore had rolled back — live breakage in
+exchange for a risk reachable only by editing `run.sh`.
 
 ## Testing the invariants
 

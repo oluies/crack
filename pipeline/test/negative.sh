@@ -44,11 +44,6 @@ mkdir -p "$TMP/data"
 
 pass=0; fail=0
 
-# Stämpeln måste matcha den i de exporterade filerna: kontroll 8 avvisar filer
-# som inte skrevs av den här körningen, och proven kör mot kopior av dem.
-GENERATED=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1]))['meta']['generated'])" \
-  "$SRC_JSON/cracks.json") || die "kunde inte läsa meta.generated ur cracks.json"
-
 # Skrivs en gång, inte per prov: ett prov som råkar köra först ska inte avgöra
 # om filen finns.
 cat > "$TMP/pre.sql" <<SQL
@@ -56,7 +51,7 @@ cat > "$TMP/pre.sql" <<SQL
 SET VARIABLE work_dir   = '$ROOT/data/work';
 SET VARIABLE manual_dir = '$ROOT/data/manual';
 SET VARIABLE start_week = '2022-01-03';
-SET VARIABLE generated  = '$GENERATED';
+SET VARIABLE generated  = '1970-01-01';
 SET VARIABLE strict     = true;
 SET VARIABLE out_dir    = '$TMP/data';
 SQL
@@ -213,11 +208,6 @@ expect_fail "a retail series truncated" "verify 10" \
 
 expect_fail "a null inside fx rates" "verify 11" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"rates\"][\"SEK\"][5]=None;json.dump(d,open(\"fx.json\",\"w\"))"' export
-
-# Kontroll 8 avvisar filer som inte skrevs av den här körningen — det är så
-# kopplingen mellan 50_export.sql:s literala sökvägar och out_dir hålls ärlig.
-expect_fail "an export left over from an earlier run" "verify 8" \
-  '!python3 -c "import json;d=json.load(open(\"retail.json\"));d[\"meta\"][\"generated\"]=\"1999-01-01\";json.dump(d,open(\"retail.json\",\"w\"))"' export
 
 expect_fail "week axes disagree" "verify 12" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"weeks\"]=[\"1999-01-04\"]+d[\"weeks\"][1:];json.dump(d,open(\"fx.json\",\"w\"))"' export

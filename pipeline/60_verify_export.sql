@@ -7,6 +7,14 @@
 -- from a retail series — so a short array throws mid-render and blanks every
 -- chart, and a shifted one silently draws the wrong year.
 --
+-- These read through out_dir while 50_export.sql writes to a string literal —
+-- DuckDB's COPY ... TO accepts nothing else there. run.sh asserts the two agree
+-- before it builds; see the OUT_DIR check there. An earlier attempt to catch the
+-- divergence here, by comparing meta.generated against the run's stamp, was
+-- removed: it broke --verify-only (a later UTC day, or any file the idempotence
+-- restore rolled back, failed a perfectly valid export) and cost more than the
+-- latent risk it covered.
+--
 -- Contract: specs/001-crack-and-retail-fuel-site/contracts/chart-json.md
 
 -- 8. Shape first, on the raw JSON.
@@ -31,17 +39,6 @@ FROM (
     CASE
       WHEN json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
-      -- Reader and writer cannot be pointed at the same place by construction:
-      -- DuckDB's COPY ... TO takes a string LITERAL, so 50_export.sql hardcodes
-      -- site/public/data while these checks read out_dir. They agree only
-      -- because run.sh cd's to the repo root and sets out_dir to match. This
-      -- catches the divergence directly instead: a file this run did not write
-      -- carries a different generated stamp, so a stale or absent export cannot
-      -- be verified green.
-      WHEN json_extract_string(json, '$.meta.generated') IS DISTINCT FROM getvariable('generated')
-        THEN 'not written by this run (generated='
-             || coalesce(json_extract_string(json, '$.meta.generated'), 'NULL')
-             || ', expected ' || getvariable('generated') || ')'
       WHEN f <> 'fx.json' AND json_type(json->'$.series') IS DISTINCT FROM 'ARRAY'
         THEN 'series is not an array'
       WHEN f <> 'fx.json' AND json_array_length(json->'$.series') = 0

@@ -36,6 +36,22 @@ done
 die() { echo "FEL: $*" >&2; exit 1; }
 say() { echo "==> $*" >&2; }
 
+# Alla tre uppströmskällorna tappar en förfrågan då och då — kommissionens
+# server observerat mitt i en serie lyckade hämtningar. Utan omförsök fäller ett
+# enstaka nätverksglapp hela veckojobbet, och nästa körning är en vecka bort.
+retry() {  # $1 = beskrivning, resten = kommandot
+  local what="$1"; shift
+  local try wait=4
+  for try in 1 2 3 4; do
+    if "$@"; then return 0; fi
+    if [ "$try" -lt 4 ]; then
+      say "$what: försök $try misslyckades — väntar ${wait}s"
+      sleep "$wait"; wait=$((wait * 2))
+    fi
+  done
+  return 1
+}
+
 mkdir -p "$WORK" site/public/data data/manual
 
 # ---------------------------------------------------------------------------
@@ -64,8 +80,8 @@ fetch_eia() {
     full="${full}&sort[0][column]=period&sort[0][direction]=asc"
     # -g is mandatory: without it curl reads EIA's data[0] and facets[series][]
     # as glob ranges and refuses the URL with "bad range in URL".
-    code=$(curl -gsS -o "$out" -w '%{http_code}' "$full") \
-      || die "EIA ($prefix): curl misslyckades"
+    code=$(retry "EIA $prefix" curl -gsS -o "$out" -w '%{http_code}' "$full") \
+      || die "EIA ($prefix): curl misslyckades efter 4 försök"
     if [ "$code" != "200" ]; then
       die "EIA ($prefix): http $code — kontrollera EIA_API_KEY. Svar: $(head -c 300 "$out")"
     fi
@@ -92,18 +108,18 @@ fetch_ecb() {
     || die "ECB: kunde inte räkna fram startdatum"
 
   for ccy in $ECB_CURRENCIES; do
-    curl -sS -o "$WORK/ecb_${ccy}.csv" --fail \
+    retry "ECB $ccy" curl -sS -o "$WORK/ecb_${ccy}.csv" --fail \
       "${ECB_BASE}/D.${ccy}.EUR.SP00.A?format=csvdata&startPeriod=${from}" \
-      || die "ECB ($ccy): nedladdning misslyckades"
+      || die "ECB ($ccy): nedladdning misslyckades efter 4 försök"
     say "ECB $ccy: $(wc -l < "$WORK/ecb_${ccy}.csv") rader"
   done
 }
 
 fetch_oilbulletin() {
-  curl -sSL -o "$WORK/$OB_FILE" --fail "$OB_URL" \
-    || die "Oil Bulletin: nedladdning misslyckades. UUID:t roteras när kommissionen
-     republicerar — hämta det aktuella från $OB_PAGE och uppdatera OB_UUID i
-     pipeline/sources.env."
+  retry "Oil Bulletin" curl -sSL -o "$WORK/$OB_FILE" --fail "$OB_URL" \
+    || die "Oil Bulletin: nedladdning misslyckades efter 4 försök. Om servern svarar
+     men filen inte kommer: UUID:t roteras när kommissionen republicerar — hämta
+     det aktuella från $OB_PAGE och uppdatera OB_UUID i pipeline/sources.env."
   # A UUID that has been reissued often serves an HTML error page with HTTP 200,
   # which would otherwise reach read_xlsx as a baffling parse error.
   case "$(file -b --mime-type "$WORK/$OB_FILE")" in
@@ -159,6 +175,14 @@ OB_PATH="$WORK/$OB_FILE"
 STRICT=true
 if [ "$MODE" = "fixtures" ]; then STRICT=false; fi
 
+# 50_export.sql måste skriva dit 60_verify_export.sql läser. DuckDB:s COPY ... TO
+# tar bara en strängliteral, så exporten kan inte parametriseras på out_dir och
+# kopplingen kan inte göras strukturell — den kontrolleras här i stället.
+OUT_DIR="$ROOT/site/public/data"
+grep -q "TO 'site/public/data/cracks.json'" pipeline/50_export.sql \
+  || die "50_export.sql skriver inte längre till site/public/data — uppdatera OUT_DIR
+     i run.sh så att verifieringen läser samma filer som exporten skrev."
+
 cat > "$WORK/preamble.sql" <<SQL
 .bail on
 SET VARIABLE work_dir   = '$WORK';
@@ -167,7 +191,7 @@ SET VARIABLE ob_path    = '$OB_PATH';
 SET VARIABLE start_week = '$START_WEEK';
 SET VARIABLE generated  = '$(date -u +%Y-%m-%d)';
 SET VARIABLE strict     = $STRICT;
-SET VARIABLE out_dir    = '$ROOT/site/public/data';
+SET VARIABLE out_dir    = '$OUT_DIR';
 SQL
 
 if [ "$MODE" = "verify" ]; then

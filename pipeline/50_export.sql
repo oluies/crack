@@ -11,10 +11,9 @@
 --
 -- The COPY targets below are string LITERALS because DuckDB's parser accepts
 -- nothing else there — not getvariable(), not concatenation. 60_verify_export.sql
--- reads through getvariable('out_dir') instead, so the two can only agree because
--- run.sh cd's to the repo root and points out_dir here. That coupling is checked
--- rather than assumed: check 8 rejects any file whose meta.generated is not this
--- run's stamp.
+-- reads through getvariable('out_dir') instead, so the two agree only because
+-- run.sh cd's to the repo root and points out_dir at this same directory. run.sh
+-- asserts that before building rather than leaving it to convention.
 
 -- ---------------------------------------------------------------------------
 -- cracks.json

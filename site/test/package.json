@@ -1,0 +1,12 @@
+{
+  "name": "crack-smoke",
+  "private": true,
+  "type": "module",
+  "description": "Headless smoke test. Dev-only — the site itself has no npm dependencies.",
+  "scripts": { "test": "node smoke.mjs" },
+  "devDependencies": {
+    "canvas": "^3.2.0",
+    "echarts": "5.5.1",
+    "jsdom": "^27.0.0"
+  }
+}

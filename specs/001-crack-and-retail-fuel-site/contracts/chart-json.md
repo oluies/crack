@@ -36,16 +36,29 @@ change unilaterally.
       "nwe_gasoil_brent": "ICE gasoil USD/t / 7.45 - Brent USD/bbl" } },
   "weeks": ["2022-01-03", "2022-01-10", "..."],
   "series": [
-    { "key": "us_ulsd_brent", "label": "NYH ULSD – Brent",
+    { "key": "us_ulsd_brent", "label": "NYH ULSD – Brent", "kind": "spread",
       "region": "US", "unit": "USD/bbl",
       "values": [23.41, 24.02, null, "..."] },
-    { "key": "us_ulsd_wti", "label": "NYH ULSD – WTI",
+    { "key": "us_ulsd_wti", "label": "NYH ULSD – WTI", "kind": "spread",
       "region": "US", "unit": "USD/bbl", "values": ["..."] },
-    { "key": "nwe_gasoil_brent", "label": "ICE gasoil – Brent",
-      "region": "NWE", "unit": "USD/bbl", "values": [] }
+    { "key": "nwe_gasoil_brent", "label": "ICE gasoil – Brent", "kind": "spread",
+      "region": "NWE", "unit": "USD/bbl", "values": [] },
+
+    { "key": "brent", "label": "Brent", "kind": "level",
+      "region": "US", "unit": "USD/bbl", "values": ["..."] },
+    { "key": "wti", "label": "WTI", "kind": "level",
+      "region": "US", "unit": "USD/bbl", "values": ["..."] },
+    { "key": "ulsd", "label": "NYH ULSD", "kind": "level",
+      "region": "US", "unit": "USD/gal", "values": ["..."] }
   ]
 }
 ```
+
+`kind` separates the derived spreads from the underlying price levels. The crack
+chart draws `kind == "spread"`; the dual-axis rockets-and-feathers chart draws
+`kind == "level"` against US retail from `retail.json` (FR-027). Publishing the
+levels here rather than in a fourth file keeps every series that shares the crude
+provenance block in one place.
 
 `nwe_gasoil_brent` is always present, with `values: []` when the manual CSV is
 empty. The frontend distinguishes "series absent" (a bug) from "series present but

@@ -1,0 +1,92 @@
+name: Data refresh and deploy
+
+on:
+  schedule:
+    # Tuesdays 06:00 UTC. The Oil Bulletin publishes Monday and EIA's weekly
+    # retail series lands Monday afternoon US time; a day's slack means the
+    # refresh picks up the new week rather than repeating the previous one.
+    - cron: '0 6 * * 2'
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'build.mill'
+      - '.github/workflows/refresh.yml'
+
+permissions:
+  contents: write      # commit refreshed JSON
+  pages: write         # deploy
+  id-token: write      # deploy-pages OIDC
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Refresh data and build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/coursier
+            ~/.cache/mill
+            out
+          key: mill-${{ runner.os }}-${{ hashFiles('build.mill', 'site/app/src/**') }}
+          restore-keys: mill-${{ runner.os }}-
+
+      - name: Install DuckDB CLI
+        run: |
+          curl -sL https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.zip -o duckdb.zip
+          unzip -q duckdb.zip && sudo mv duckdb /usr/local/bin/ && duckdb --version
+
+      # Only on the scheduled/manual path. A push to site/ redeploys the existing
+      # data rather than spending an API round trip to rebuild it unchanged.
+      - name: Refresh data
+        if: github.event_name != 'push'
+        env:
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+        run: pipeline/run.sh
+
+      # run.sh restores a file whose only change was the refresh timestamp, so
+      # an unchanged upstream leaves no diff here and nothing is committed.
+      - name: Commit refreshed data
+        if: github.event_name != 'push'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add site/public/data
+          if git diff --cached --quiet -- site/public/data; then
+            echo "Inga dataändringar – hoppar commit."
+          else
+            git commit -m "data refresh $(date -u +%Y-%m-%d) [skip ci]"
+            git push
+          fi
+
+      - name: Link the frontend
+        run: ./mill site.bundleFull
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

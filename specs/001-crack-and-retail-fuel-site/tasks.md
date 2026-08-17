@@ -74,6 +74,23 @@ Independent of Phase 2; different sources, different chart.
   the legend), SC-004 (all 12 toggle combinations render with correct units).
   **Checkpoint: Story 2 is deliverable on its own.**
 
+## Phase 3b: Threshold and dual-axis views — User Stories 5 & 6 (P2)
+
+- **T033** Extend `40_cracks.sql`/`50_export.sql` to publish the Brent, WTI and ULSD
+  levels as `kind: "level"` series in `cracks.json` (FR-027).
+- **T034** `Charts.scala` — threshold ("mountain") mode on the crack chart: ECharts
+  `visualMap` piecewise on the y dimension colours line and `areaStyle` green above
+  / red below the threshold, with `markLine` as the dashed labelled reference.
+  Colours are elmix's RdYlGn endpoints `#1a9850` / `#d73027`, not raw green/red.
+  `connectNulls: false` so fills break at gaps (FR-025).
+- **T035** `Main.scala` — threshold control (number input plus slider), retained
+  across a switch back to plain line view; re-renders from in-memory data (FR-024).
+- **T036** `Charts.scala` — dual-axis "rockets and feathers" chart: crude levels on
+  the left axis in USD/bbl, US retail diesel/gasoline on the right in USD/gal,
+  per-series units in the tooltip, legend toggling per series (FR-026).
+- **T037** Verify SC-008 (threshold re-render under 100 ms, no network) and SC-009
+  (the 2022 asymmetry is legible).
+
 ## Phase 4: Provenance — User Story 3 (P2)
 
 - **T025** [P] `meta` blocks on all three JSON files: source, URL, licence, series

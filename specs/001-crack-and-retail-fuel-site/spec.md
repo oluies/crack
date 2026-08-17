@@ -123,6 +123,60 @@ nothing.
 3. **Given** an upstream source is unreachable, **When** the pipeline fails, **Then**
    the previously published data stays live and the workflow reports failure.
 
+### User Story 5 - See the margin against a breakeven (Priority: P2)
+
+Rather than reading a line against a bare axis, a visitor sets a threshold — a
+refinery breakeven, a target margin — and sees the crack spread as a filled mountain
+that is green where it clears the threshold and red where it does not. The eye picks
+out the profitable and pressured stretches without reading any numbers.
+
+**Why this priority**: It reframes data Story 1 already publishes, so it costs no new
+source. It changes the crack chart from something you read into something you scan.
+
+**Independent Test**: With only `cracks.json` published, switch the crack chart to
+threshold view, drag the threshold, and watch the shading cross over at the value set.
+
+**Acceptance Scenarios**:
+
+1. **Given** the crack chart is in threshold view, **When** the visitor looks at it,
+   **Then** the area between the line and the threshold is filled green where the
+   spread is above it and red where below, with the threshold drawn as a dashed
+   reference line labelled with its value.
+2. **Given** the visitor changes the threshold, **When** the value updates, **Then**
+   the shading and the reference line move with it, without refetching data.
+3. **Given** a week has no observation, **When** the chart renders, **Then** the fill
+   breaks at that week rather than spanning the gap.
+4. **Given** threshold view is active, **When** the visitor switches to plain line
+   view, **Then** the same series renders unfilled and the threshold is retained for
+   when they switch back.
+
+---
+
+### User Story 6 - Watch rockets and feathers (Priority: P2)
+
+A visitor compares crude benchmarks against pump prices on one chart — crude in USD
+per barrel on the left axis, retail fuel in USD per gallon on the right — to see the
+asymmetry: pump prices chase a crude spike up quickly and drift back down slowly.
+
+**Why this priority**: It uses series Stories 1 and 2 already fetch, and it is the
+comparison that explains the retail chart's shape. It needs both, so it lands after
+either alone.
+
+**Independent Test**: With `cracks.json` and `retail.json` published, the dual-axis
+chart draws Brent and WTI against US retail diesel and gasoline, each axis labelled
+in its own unit, and the axes align at a common baseline rather than floating.
+
+**Acceptance Scenarios**:
+
+1. **Given** the chart is open, **When** the visitor reads it, **Then** crude series
+   are on the left axis in USD/bbl and retail series on the right in USD/gal, with
+   both units named on their axis.
+2. **Given** the visitor hovers a week, **When** the tooltip appears, **Then** it
+   lists every visible series with its own unit, not a shared one.
+3. **Given** the visitor toggles a series off via the legend, **When** the chart
+   updates, **Then** the remaining series rescale and the hidden one's axis stays
+   labelled if its partner is still shown.
+
 ### Edge Cases
 
 - **Sources disagree on the week.** EIA spot prices are daily, EIA retail is weekly
@@ -198,6 +252,17 @@ nothing.
 - **FR-018**: Each chart MUST state its sources and the data's refresh date.
 - **FR-019**: The site MUST function as static files served from any path, with no
   request at page load to any origin other than the ECharts CDN.
+- **FR-023**: The crack chart MUST offer a threshold ("mountain") view filling the
+  area between the spread and a visitor-set threshold, green above and red below,
+  with the threshold drawn as a labelled dashed reference line.
+- **FR-024**: The threshold MUST be adjustable by the visitor and MUST re-render
+  from data already in the browser, without refetching.
+- **FR-025**: Threshold fills MUST break at missing weeks rather than spanning them.
+- **FR-026**: The site MUST provide a dual-axis chart plotting crude benchmarks
+  (USD/bbl, left axis) against US retail fuel prices (USD/gal, right axis), with each
+  axis labelled in its own unit and the tooltip reporting per-series units.
+- **FR-027**: `cracks.json` MUST publish the underlying Brent, WTI, and ULSD levels
+  alongside the derived spreads, so the dual-axis chart needs no additional file.
 
 **Operations**
 
@@ -240,6 +305,11 @@ nothing.
 - **SC-006**: The complete published site, excluding the CDN-loaded charting library,
   is under 5 MB.
 - **SC-007**: The weekly workflow completes in under 10 minutes.
+- **SC-008**: Changing the crack threshold re-renders in under 100 ms, with no
+  network request.
+- **SC-009**: On the dual-axis chart a visitor can identify, for the 2022 crude
+  spike, that retail prices rose within weeks and fell back over months — the
+  rockets-and-feathers asymmetry is visible without computing anything.
 
 ## Assumptions
 

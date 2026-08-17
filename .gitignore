@@ -21,3 +21,5 @@ data/work/
 
 # OS
 .DS_Store
+# roborev snapshots
+/.roborev/

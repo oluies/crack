@@ -18,22 +18,26 @@ FROM (
   FROM stg.week_calendar
 ) WHERE prev IS NOT NULL AND week_start - prev <> 7;
 
--- 2. One row per key, in each staging table. A duplicate would be silently
---    averaged away downstream.
+-- 2. One row per key in the PRE-aggregation tables.
+--
+--    These must target the raw rows, not the weekly tables: asserting
+--    uniqueness on a table whose own GROUP BY produces the key is tautological
+--    and reports green on precisely the upstream double-publication it claims
+--    to catch. The earlier version of this file made that mistake.
 SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 2a: crack_weekly has {} duplicate (week, series)', count(*)))
-END AS "2a crack_weekly unique"
-FROM (SELECT 1 FROM stg.crack_weekly GROUP BY week_start, series_key HAVING count(*) > 1);
+  THEN error(format('verify 2a: EIA spot has {} duplicate (date, series) rows upstream', count(*)))
+END AS "2a EIA spot rows unique"
+FROM (SELECT 1 FROM stg.spot_daily GROUP BY obs_date, series_id HAVING count(*) > 1);
 
 SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 2b: retail_eu_weekly has {} duplicate (week, cc, fuel, tax)', count(*)))
-END AS "2b retail_eu_weekly unique"
-FROM (SELECT 1 FROM stg.retail_eu_weekly GROUP BY week_start, cc, fuel, tax HAVING count(*) > 1);
+  THEN error(format('verify 2b: Oil Bulletin has {} duplicate (date, cc, fuel, tax) rows upstream', count(*)))
+END AS "2b Oil Bulletin rows unique"
+FROM (SELECT 1 FROM stg.ob_parsed GROUP BY obs_date, cc, fuel, tax HAVING count(*) > 1);
 
 SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 2c: retail_us_weekly has {} duplicate (week, fuel)', count(*)))
-END AS "2c retail_us_weekly unique"
-FROM (SELECT 1 FROM stg.retail_us_weekly GROUP BY week_start, fuel HAVING count(*) > 1);
+  THEN error(format('verify 2c: EIA retail has {} duplicate (date, series) rows upstream', count(*)))
+END AS "2c EIA retail rows unique"
+FROM (SELECT 1 FROM stg.retail_us_raw GROUP BY obs_date, series_id HAVING count(*) > 1);
 
 -- 3. All 27 members present in the most recent week that has any EU data.
 --    Catches a country quietly dropping out of the workbook.
@@ -88,10 +92,17 @@ FROM (
   WHERE f.per_eur IS NULL
 );
 
+-- 7. No long trailing run of empty weeks. Live data only.
+--
+--    The fixtures are a frozen snapshot while week_calendar tracks current_date,
+--    so this check would start failing every CI run some weeks after the
+--    fixtures were generated — blocking every pull request with a failure that
+--    has nothing to do with the change under test. run.sh sets strict=false in
+--    fixtures mode for exactly this reason.
 -- 7. No long trailing run of empty weeks. The calendar ends at the last complete
 --    week, but if a source has stalled we would publish a flat blank tail and
 --    call it data. Two weeks of slack absorbs normal publication lag.
-SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
+SELECT CASE WHEN getvariable('strict') AND (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.crack_weekly
                              WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 14
   THEN error(format('verify 7: crack data stale - calendar ends {}, last observation {}',
@@ -100,7 +111,7 @@ SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
 END AS "7 crack data fresh"
 ;
 
-SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
+SELECT CASE WHEN getvariable('strict') AND (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly), DATE '1900-01-01') > 14
   THEN error(format('verify 7b: EU retail data stale - calendar ends {}, last observation {}',
                     (SELECT max(week_start) FROM stg.week_calendar),

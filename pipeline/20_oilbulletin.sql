@@ -21,7 +21,11 @@
 -- differs. The sheet is still carried through the join key, because a given
 -- column letter means different things in the two sheets.
 
-CREATE OR REPLACE TABLE stg.retail_eu_weekly AS
+-- Materialiserad före veckoaggregeringen. Dubblettkontrollen i verify.sql måste
+-- köra mot DEN HÄR tabellen: en unikhetskontroll på veckotabellen nedan är
+-- tautologisk — dess GROUP BY garanterar den — och skulle rapportera grönt på
+-- precis den dubbelpublicering den påstår sig fånga.
+CREATE OR REPLACE TABLE stg.ob_parsed AS
 WITH hdr AS (
   SELECT 'with' AS sheet_tax, col, label
   FROM (UNPIVOT (SELECT * FROM read_xlsx(getvariable('ob_path'),
@@ -51,7 +55,11 @@ dat AS (
 parsed AS (
   SELECT
     -- Excel 1900-system serial. Verified: 46244 -> 2026-08-10.
-    (DATE '1899-12-30' + INTERVAL (d.date_serial::INT) DAY)::DATE AS obs_date,
+    -- TRY_CAST, not a hard cast: the read range runs to row 3000, well past the
+    -- data, and a footnote or text marker in column A would otherwise abort the
+    -- whole run instead of dropping one row. A null serial falls out below via
+    -- the start_week filter.
+    (DATE '1899-12-30' + INTERVAL (TRY_CAST(d.date_serial AS INT)) DAY)::DATE AS obs_date,
     regexp_extract(h.label, '^([A-Z]{2})_price_(with|wo)_tax_(euro95|diesel)$', 1) AS cc,
     h.sheet_tax                                                                    AS tax,
     CASE regexp_extract(h.label, '^([A-Z]{2})_price_(with|wo)_tax_(euro95|diesel)$', 3)
@@ -70,15 +78,17 @@ parsed AS (
   WHERE h.label SIMILAR TO '[A-Z]{2}_price_(with|wo)_tax_(euro95|diesel)'
     AND TRY_CAST(d.val AS DOUBLE) IS NOT NULL
 )
-SELECT
-  date_trunc('week', p.obs_date)::DATE AS week_start,
-  p.cc,
-  p.fuel,
-  p.tax,
-  AVG(p.eur_per_l)                     AS eur_per_l
+SELECT p.obs_date, p.cc, p.fuel, p.tax, p.eur_per_l
 FROM parsed p
 -- The join is the country filter. 'EU_' also matches [A-Z]{2} and would
 -- otherwise ride along as a 28th country; UK is in the history but not the EU-27.
 JOIN stg.eu27 c ON c.cc = p.cc
-WHERE p.obs_date >= getvariable('start_week')::DATE
+WHERE p.obs_date >= getvariable('start_week')::DATE;
+
+CREATE OR REPLACE TABLE stg.retail_eu_weekly AS
+SELECT
+  date_trunc('week', obs_date)::DATE AS week_start,
+  cc, fuel, tax,
+  AVG(eur_per_l)                     AS eur_per_l
+FROM stg.ob_parsed
 GROUP BY 1, 2, 3, 4;

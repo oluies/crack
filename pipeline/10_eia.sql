@@ -31,24 +31,36 @@ WHERE d.period::DATE >= getvariable('start_week')::DATE
 -- ---------------------------------------------------------------------------
 -- US weekly retail, already published Monday-weekly by EIA.
 --
--- date_trunc is therefore a key derivation, not an aggregation. If EIA ever
--- publishes twice within a week the AVG below hides it, so verify.sql asserts
--- one row per (week, fuel) instead of trusting that it cannot happen.
+-- Kept as raw rows first, and aggregated in a second step. The duplicate check
+-- in verify.sql has to run against THIS table: asserting uniqueness on the
+-- aggregate below would be tautological — the GROUP BY guarantees it — and
+-- would report green on exactly the upstream double-publication it claims to
+-- catch.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE stg.retail_us_weekly AS
+CREATE OR REPLACE TABLE stg.retail_us_raw AS
 WITH raw AS (
   SELECT UNNEST(response.data) AS d
   FROM read_json_auto(getvariable('work_dir') || '/eia_retail_*.json')
 )
 SELECT
-  date_trunc('week', d.period::DATE)::DATE AS week_start,
+  d.period::DATE    AS obs_date,
+  d.series::VARCHAR AS series_id,
   CASE d.series::VARCHAR
     WHEN 'EMM_EPMR_PTE_NUS_DPG' THEN 'gasoline'
     WHEN 'EMD_EPD2D_PTE_NUS_DPG' THEN 'diesel'
-  END                                      AS fuel,
-  AVG(TRY_CAST(d.value AS DOUBLE))         AS usd_per_gal
+  END               AS fuel,
+  TRY_CAST(d.value AS DOUBLE) AS usd_per_gal
 FROM raw
 WHERE d.period::DATE >= getvariable('start_week')::DATE
   AND TRY_CAST(d.value AS DOUBLE) IS NOT NULL
-GROUP BY 1, 2
-HAVING fuel IS NOT NULL;
+  AND d.series::VARCHAR IN ('EMM_EPMR_PTE_NUS_DPG', 'EMD_EPD2D_PTE_NUS_DPG');
+
+-- date_trunc is a key derivation here, not an aggregation: EIA already
+-- publishes these on Mondays.
+CREATE OR REPLACE TABLE stg.retail_us_weekly AS
+SELECT
+  date_trunc('week', obs_date)::DATE AS week_start,
+  fuel,
+  AVG(usd_per_gal)                   AS usd_per_gal
+FROM stg.retail_us_raw
+GROUP BY 1, 2;

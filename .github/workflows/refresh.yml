@@ -72,6 +72,24 @@ jobs:
             git push
           fi
 
+      # The push path skips the refresh and deploys whatever JSON is committed.
+      # If those files are absent the deploy would publish a site that renders
+      # nothing but the "could not load the published data" banner, so fail here
+      # instead of shipping it.
+      - name: Ensure published data exists
+        run: |
+          missing=0
+          for f in cracks retail fx; do
+            if [ ! -s "site/public/data/$f.json" ]; then
+              echo "FEL: site/public/data/$f.json saknas eller är tom"; missing=1
+            fi
+          done
+          if [ "$missing" = 1 ]; then
+            echo "Deployen skulle publicera en sida utan data. Kör workflow_dispatch"
+            echo "(som hämtar data) eller committa datafilerna först."
+            exit 1
+          fi
+
       - name: Link the frontend
         run: ./mill site.bundleFull
 

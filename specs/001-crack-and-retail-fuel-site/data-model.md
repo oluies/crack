@@ -109,18 +109,40 @@ Every ISO week Monday from 2022-01-03 to the last **complete** week. Every publi
 series is left-joined onto this so all charts share one axis and gaps stay visible
 as gaps. The current partial week is excluded here, once, rather than in five places.
 
-## Invariants (`verify.sql`)
+## Invariants
 
 Each assertion fails the run with a message naming what broke.
 
+### Staging (`verify.sql`, before export)
+
 1. `week_calendar` has no gaps — consecutive Mondays, 7 days apart throughout.
-2. No `(week_start, series_key)` duplicates in `crack_weekly`, nor
-   `(week_start, cc, fuel, tax)` in `retail_eu_weekly`.
+2. No duplicate rows **in the pre-aggregation tables**: `(obs_date, series_id)` in
+   `spot_daily` and `retail_us_raw`, `(obs_date, cc, fuel, tax)` in `ob_parsed`.
+   These must target the raw rows. Asserting uniqueness on a weekly table whose
+   own `GROUP BY` produces that key is tautological — it reports green on exactly
+   the upstream double-publication it claims to catch.
 3. All 27 EU members present in the latest published week for with-tax diesel.
 4. Swedish with-tax diesel lies in 1.0–3.0 EUR/L across the whole range — catches a
    reintroduced exchange-rate multiplication.
 5. US crack spreads lie in −20 to 120 USD/bbl — wide enough for the 2022 spike,
    tight enough to catch a unit error such as omitting the ×42.
 6. `fx_weekly` covers every calendar week for both currencies.
-7. Every published series is null-free at its own last observation, or absent —
-   guards against a trailing partial week slipping in.
+7. No long trailing run of empty weeks — data has not gone stale upstream.
+   **Live runs only.** Fixtures are a frozen snapshot while `week_calendar`
+   tracks `current_date`, so this would start failing every CI run weeks after
+   the fixtures were generated, blocking pull requests for an unrelated reason.
+   `run.sh` sets `strict=false` in fixtures mode.
+
+### Published JSON (`60_verify_export.sql`, after export)
+
+`verify.sql` cannot see these — it runs against staging, before the files exist.
+
+8. Every series in `cracks.json` is aligned to `weeks[]`, or empty (the ICE stub).
+9. Every series in `retail.json` is aligned to `weeks[]`.
+10. `fx.json` rates are aligned to `weeks[]` **and** contain no nulls.
+11. All three files share one week axis.
+
+Checks 8–11 exist because the wide-form contract is entirely positional and the
+frontend indexes without bounds checks: `Fx.convert` reads `usd(i)` for an `i`
+originating in a retail series. A short array throws mid-render and blanks every
+chart; a merely shifted one draws the wrong year and looks fine.

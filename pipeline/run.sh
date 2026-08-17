@@ -152,6 +152,13 @@ esac
 
 OB_PATH="$WORK/$OB_FILE"
 
+# Fixtures är en fryst ögonblicksbild medan week_calendar följer current_date.
+# Färskhetskontrollerna i verify.sql skulle därför börja fälla varje CI-körning
+# några veckor efter att fixtures genererades — och blockera varje pull request
+# med ett fel som inte har med ändringen att göra.
+STRICT=true
+if [ "$MODE" = "fixtures" ]; then STRICT=false; fi
+
 cat > "$WORK/preamble.sql" <<SQL
 .bail on
 SET VARIABLE work_dir   = '$WORK';
@@ -159,11 +166,13 @@ SET VARIABLE manual_dir = '$ROOT/data/manual';
 SET VARIABLE ob_path    = '$OB_PATH';
 SET VARIABLE start_week = '$START_WEEK';
 SET VARIABLE generated  = '$(date -u +%Y-%m-%d)';
+SET VARIABLE strict     = $STRICT;
 SQL
 
 if [ "$MODE" = "verify" ]; then
   say "kör invarianter"
-  duckdb "$DB" -f "$WORK/preamble.sql" -f pipeline/verify.sql
+  duckdb "$DB" -f "$WORK/preamble.sql" \
+    -f pipeline/verify.sql -f pipeline/60_verify_export.sql
   exit $?
 fi
 
@@ -181,7 +190,8 @@ duckdb "$DB" \
   -f pipeline/30_ecb.sql \
   -f pipeline/40_cracks.sql \
   -f pipeline/verify.sql \
-  -f pipeline/50_export.sql
+  -f pipeline/50_export.sql \
+  -f pipeline/60_verify_export.sql
 
 # ---------------------------------------------------------------------------
 # Idempotens

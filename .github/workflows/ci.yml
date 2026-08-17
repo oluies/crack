@@ -58,8 +58,12 @@ jobs:
           ./mill site.bundleFast
           cd site/test && npm install --no-audit --no-fund && node smoke.mjs
 
-      # The fixture build overwrites the committed JSON; CI must not push that
-      # synthetic data anywhere, so leave the tree as it was found.
-      - name: Restore committed data
+      # The fixture build writes synthetic crack data into site/public/data.
+      # git checkout alone is not enough — it is a no-op for files that are not
+      # tracked yet — so clean untracked output too.
+      - name: Discard fixture-built data
         if: always()
-        run: git checkout -- site/public/data || true
+        run: |
+          git checkout -- site/public/data 2>/dev/null || true
+          git clean -fdq site/public/data
+          git status --short -- site/public/data

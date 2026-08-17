@@ -129,11 +129,17 @@ object Charts:
             val v = p.value
             if v == null || js.isUndefined(v) then s"<b>${p.axisValue}</b><br>no observation"
             else
-              val d0 = v.asInstanceOf[Double]
-              val rel = if d0 >= threshold then "above" else "below"
-              s"<b>${p.axisValue}</b><br>${s.label}: ${fixed(d0, 2)} USD/bbl" +
-                s"<br><span style='color:${if d0 >= threshold then Above else Below}'>" +
-                s"${fixed(math.abs(d0 - threshold), 2)} $rel threshold</span>"
+              val d0   = v.asInstanceOf[Double]
+              val diff = d0 - threshold
+              val head = s"<b>${p.axisValue}</b><br>${s.label}: ${fixed(d0, 2)} USD/bbl"
+              // Vid exakt tröskeln ligger färgövergången precis på punkten, så
+              // "above"/"below" vore godtyckligt — säg då att den ligger på den.
+              if fixed(math.abs(diff), 2) == "0.00" then s"$head<br>at threshold"
+              else
+                val col = if diff > 0 then Above else Below
+                val rel = if diff > 0 then "above" else "below"
+                s"$head<br><span style='color:$col'>" +
+                  s"${fixed(math.abs(diff), 2)} $rel threshold</span>"
           }
         ): js.Function1[js.Array[js.Dynamic], String]
       ),

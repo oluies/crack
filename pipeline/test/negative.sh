@@ -238,10 +238,77 @@ guard() {  # $1 = namn, $2 = "fail"|"pass", $3 = out_dir, $4 = export-sql
 
 sed "s|TO 'site/public/data/retail.json'|TO 'nagon/annan/retail.json'|" \
   pipeline/50_export.sql > "$TMP/export_moved.sql"
+# Samma krav som på korruptionerna ovan: en sed som slutat matcha gör provet
+# till en kopia, och "did not fail at all" skulle då skyllas på guarden i
+# stället för på en förlegad testfixtur.
+cmp -s pipeline/50_export.sql "$TMP/export_moved.sql" \
+  && die "sed-mönstret matchade inte längre — COPY-målet i 50_export.sql har bytt form"
 
 guard "export paths as shipped"          pass "$ROOT/site/public/data" pipeline/50_export.sql
 guard "one COPY target redirected"       fail "$ROOT/site/public/data" "$TMP/export_moved.sql"
 guard "out_dir moved, export unchanged"  fail "$ROOT/nagon/annan"      pipeline/50_export.sql
+
+# --- the fetch retry logic ---------------------------------------------------
+#
+# The argument for the guard above applies to the retry too: the properties this
+# repo just restored — the status comes from LAST_CODE rather than accumulated
+# -w output, and a 429/5xx re-runs while a 403 does not — were asserted only by
+# a commit message. A stub curl earlier on PATH makes them cheap to check.
+
+fetch_case() {  # $1 = namn, $2 = koder stubben ska ge i tur och ordning,
+                # $3 = förväntat "ok"/"fail", $4 = förväntad LAST_CODE,
+                # $5 = förväntat antal anrop
+  local name="$1" codes="$2" want="$3" want_code="$4" want_calls="$5"
+
+  local d="$TMP/stub"; rm -rf "$d"; mkdir -p "$d"
+  printf '%s\n' "$codes" > "$d/codes"
+  cat > "$d/curl" <<'STUB'
+#!/usr/bin/env bash
+d="$(dirname "$0")"
+n=$(cat "$d/calls" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$d/calls"
+code=$(sed -n "${n}p" "$d/codes"); [ -n "$code" ] || code=$(tail -1 "$d/codes")
+[ "$code" = "NET" ] && exit 7      # nätverksfel: curl misslyckas, ingen -w-utskrift
+printf '%s' "$code"
+STUB
+  chmod +x "$d/curl"
+
+  local out rc code calls
+  out=$(
+    PATH="$d:$PATH"
+    RETRY_FATAL=0; LAST_CODE=""
+    # sleep stubbas bort: provet ska inte kosta 28 s backoff.
+    sleep() { :; }
+    . pipeline/lib/fetch.sh
+    retry "stub" eia_get "http://x" "$TMP/stub_out" >/dev/null 2>&1
+    printf '%s|%s' "$?" "$LAST_CODE"
+  )
+  rc="${out%%|*}"; code="${out##*|}"
+  calls=$(cat "$d/calls" 2>/dev/null || echo 0)
+
+  local got="fail"; [ "$rc" = "0" ] && got="ok"
+  if [ "$got" = "$want" ] && [ "$code" = "$want_code" ] && [ "$calls" = "$want_calls" ]; then
+    printf 'ok    %-44s -> %s, LAST_CODE=%s, %s anrop\n' "$name" "$got" "$code" "$calls"
+    pass=$((pass+1))
+  else
+    printf 'FAIL  %-44s -> %s/%s/%s, väntade %s/%s/%s\n' \
+      "$name" "$got" "$code" "$calls" "$want" "$want_code" "$want_calls"
+    fail=$((fail+1))
+  fi
+}
+
+#            namn                                    koder        utfall  kod  anrop
+fetch_case "200 first time"                          "200"        ok   200 1
+# Regressionen: koden får inte bli "503200".
+fetch_case "503 then 200 (transient, retried)"       "503
+200"        ok   200 2
+fetch_case "429 then 200 (rate limit, retried)"      "429
+200"        ok   200 2
+fetch_case "network error then 200"                  "NET
+200"        ok   200 2
+fetch_case "403 is permanent, not retried"           "403
+200"        fail 403 1
+fetch_case "404 is permanent, not retried"           "404"        fail 404 1
+fetch_case "503 throughout gives up after 4"         "503"        fail 503 4
 
 # --- the happy path must still be green --------------------------------------
 

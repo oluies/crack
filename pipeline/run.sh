@@ -33,124 +33,24 @@ for arg in "$@"; do
   esac
 done
 
-die() { echo "FEL: $*" >&2; exit 1; }
-say() { echo "==> $*" >&2; }
+# Nedladdningshjälparna ligger i en source:bar fil så att pipeline/test/negative.sh
+# kan pröva omförsökslogiken utan att köra hela pipelinen.
+# shellcheck source=lib/fetch.sh
+. pipeline/lib/fetch.sh
 
-# Alla tre uppströmskällorna tappar en förfrågan då och då — kommissionens
-# server observerat mitt i en serie lyckade hämtningar. Utan omförsök fäller ett
-# enstaka nätverksglapp hela veckojobbet, och nästa körning är en vecka bort.
-retry() {  # $1 = beskrivning, resten = kommandot
-  local what="$1"; shift
-  local try wait=4
-  for try in 1 2 3 4; do
-    if "$@"; then return 0; fi
-    if [ "$try" -lt 4 ]; then
-      say "$what: försök $try misslyckades — väntar ${wait}s"
-      sleep "$wait"; wait=$((wait * 2))
-    fi
-  done
-  return 1
-}
+# En enda plats som bestämmer var exporten hamnar. Guarden nedan lovar i sitt
+# felmeddelande att OUT_DIR är ratten — då måste den faktiskt vara det, annars
+# skulle ett byte lämna katalogen oskapad och idempotensjämförelsen längre ner
+# tyst titta i den gamla.
+OUT_DIR="$ROOT/site/public/data"
 
-mkdir -p "$WORK" site/public/data data/manual
+mkdir -p "$WORK" "$OUT_DIR" data/manual
 
 # Exporten skriver till strängliteraler, verifieringen läser ur out_dir. Kollas
 # före hämtningarna: ett felkonfigurerat par ska inte kosta fyra nedladdningar
 # först. Egen skript-fil så att negative.sh kan bevisa att kontrollen fäller.
-OUT_DIR="$ROOT/site/public/data"
 pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
   || die "exporten och verifieringen pekar på olika kataloger (se ovan)"
-
-# ---------------------------------------------------------------------------
-# Download
-#
-# Each fetch names its own source on failure (FR-006) — "the pipeline broke" is
-# not a diagnosis when there are three independent upstreams.
-# ---------------------------------------------------------------------------
-
-# EIA pages at 5000 rows. Three daily series over four years is ~3600 rows, so
-# this is one page today; the loop exists so a longer window does not silently
-# truncate. Files are numbered and read back as a glob, so an extra page needs
-# no change in the SQL.
-fetch_eia() {
-  local url="$1" prefix="$2" freq="$3"; shift 3
-  local facets="" s
-  for s in "$@"; do facets="${facets}&facets[series][]=${s}"; done
-
-  rm -f "$WORK/${prefix}"_*.json
-
-  local page=0 offset=0 out n full
-  while :; do
-    out=$(printf '%s/%s_%03d.json' "$WORK" "$prefix" "$page")
-    full="${url}?api_key=${EIA_API_KEY}&frequency=${freq}&data[0]=value${facets}"
-    full="${full}&start=${START_WEEK}&length=5000&offset=${offset}"
-    full="${full}&sort[0][column]=period&sort[0][direction]=asc"
-
-    retry "EIA $prefix" eia_get "$full" "$out" \
-      || die "EIA ($prefix): hämtning misslyckades efter 4 försök (senaste svar:
-     ${LAST_CODE:-nätverksfel}). Vid 403 — kontrollera EIA_API_KEY. Svar: $(head -c 300 "$out" 2>/dev/null)"
-
-    n=$(duckdb -noheader -list -c \
-          "SELECT coalesce(len(response.data), 0) FROM read_json_auto('$out')") \
-      || die "EIA ($prefix): svaret är inte den väntade {response:{data:[...]}}-formen"
-    say "EIA $prefix sida $page: $n rader"
-    if [ "$n" -lt 5000 ]; then break; fi
-    offset=$((offset + 5000)); page=$((page + 1))
-  done
-}
-
-# Statuskoden måste testas INNE i den omförsökta enheten. Utan --fail avslutar
-# curl med 0 på 429/500/503, så ett omförsök på exitkod ensamt skulle bara täcka
-# nätverksfel — och det är just rate-limit och 5xx som är "servern tappade en
-# förfrågan" för ett nyckelskyddat JSON-API.
-#
-# Koden får inte heller fångas ur retry: curl skriver sin -w-sträng vid varje
-# försök, så ett misslyckat följt av ett lyckat gav "000200" och en die() som
-# skyllde på API-nyckeln.
-LAST_CODE=""
-eia_get() {  # $1 = url, $2 = utfil
-  local code
-  # -g är nödvändigt: utan det läser curl EIA:s data[0] och facets[series][]
-  # som globb-intervall och vägrar URL:en med "bad range in URL".
-  code=$(curl -gsS -o "$2" -w '%{http_code}' "$1") || { LAST_CODE=""; return 1; }
-  LAST_CODE="$code"
-  [ "$code" = "200" ]
-}
-
-fetch_ecb() {
-  # Starta två veckor tidigare så att den första publicerade veckan redan har en
-  # kurs på eller före sig för ASOF-joinen att hitta.
-  #
-  # Datumräkningen görs i DuckDB, inte med date(1): BSD vill ha -v -f i en viss
-  # ordning och GNU vill ha -d, och en tyst felaktig flaggordning ger ett datum
-  # med blanksteg som förstör URL:en i stället för att fela.
-  local from ccy
-  from=$(duckdb -noheader -list -c \
-    "SELECT (DATE '$START_WEEK' - INTERVAL 14 DAY)::DATE") \
-    || die "ECB: kunde inte räkna fram startdatum"
-
-  for ccy in $ECB_CURRENCIES; do
-    retry "ECB $ccy" curl -sS -o "$WORK/ecb_${ccy}.csv" --fail \
-      "${ECB_BASE}/D.${ccy}.EUR.SP00.A?format=csvdata&startPeriod=${from}" \
-      || die "ECB ($ccy): nedladdning misslyckades efter 4 försök"
-    say "ECB $ccy: $(wc -l < "$WORK/ecb_${ccy}.csv") rader"
-  done
-}
-
-fetch_oilbulletin() {
-  retry "Oil Bulletin" curl -sSL -o "$WORK/$OB_FILE" --fail "$OB_URL" \
-    || die "Oil Bulletin: nedladdning misslyckades efter 4 försök. Om servern svarar
-     men filen inte kommer: UUID:t roteras när kommissionen republicerar — hämta
-     det aktuella från $OB_PAGE och uppdatera OB_UUID i pipeline/sources.env."
-  # A UUID that has been reissued often serves an HTML error page with HTTP 200,
-  # which would otherwise reach read_xlsx as a baffling parse error.
-  case "$(file -b --mime-type "$WORK/$OB_FILE")" in
-    application/vnd.openxmlformats-officedocument.spreadsheetml.sheet|application/zip) ;;
-    *) die "Oil Bulletin: nedladdningen är inte en xlsx (fick $(file -b "$WORK/$OB_FILE")).
-     UUID:t har troligen roterats — se $OB_PAGE." ;;
-  esac
-  say "Oil Bulletin: $(wc -c < "$WORK/$OB_FILE") byte"
-}
 
 case "$MODE" in
   live)
@@ -217,7 +117,7 @@ fi
 
 # Spara föregående utdata för jämförelsen nedan.
 rm -rf "$WORK/prev"; mkdir -p "$WORK/prev"
-cp site/public/data/*.json "$WORK/prev/" 2>/dev/null || true
+cp "$OUT_DIR"/*.json "$WORK/prev/" 2>/dev/null || true
 
 rm -f "$DB"
 say "bygger $DB"
@@ -243,7 +143,7 @@ duckdb "$DB" \
 # ---------------------------------------------------------------------------
 undated() { sed -E 's/"generated":"[0-9-]*"/"generated":""/' "$1"; }
 
-for f in site/public/data/*.json; do
+for f in "$OUT_DIR"/*.json; do
   prev="$WORK/prev/$(basename "$f")"
   if [ -f "$prev" ] && [ "$(undated "$f")" = "$(undated "$prev")" ]; then
     cp "$prev" "$f"
@@ -252,4 +152,4 @@ for f in site/public/data/*.json; do
 done
 
 say "klart:"
-ls -l site/public/data/*.json >&2
+ls -l "$OUT_DIR"/*.json >&2

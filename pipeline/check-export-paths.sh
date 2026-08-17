@@ -17,13 +17,21 @@ set -euo pipefail
 
 ROOT="$1"; OUT_DIR="$2"; EXPORT_SQL="$3"
 
+# Egen diagnos: utan detta blir en felstavad sökväg tre misslyckade grep och
+# meddelandet "skriver inte till ..." — vilket pekar på filens innehåll i
+# stället för på att filen inte finns.
+[ -f "$EXPORT_SQL" ] || { echo "FEL: $EXPORT_SQL finns inte" >&2; exit 1; }
+
 # COPY ... TO paths are relative to the process CWD, which run.sh sets to the
 # repo root; out_dir is absolute. Compare them in the same terms.
 REL="${OUT_DIR#"$ROOT"/}"
 
 missing=""
 for f in cracks retail fx; do
-  grep -q "TO '$REL/$f.json'" "$EXPORT_SQL" || missing="$missing $f.json"
+  # -F: $REL är en sökväg, inte ett reguljärt uttryck. Ett '[' i den skulle ge
+  # ett parse-fel och fälla guarden med fel förklaring; punkten i .json skulle
+  # tyst matcha vilket tecken som helst.
+  grep -qF "TO '$REL/$f.json'" "$EXPORT_SQL" || missing="$missing $f.json"
 done
 
 if [ -n "$missing" ]; then

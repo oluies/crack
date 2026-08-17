@@ -1,0 +1,15 @@
+pid:25967 2026-08-17T20:54:37.901312 [t1] running server in /Users/oluies/projects/crack/out/mill-daemon
+pid:25967 2026-08-17T20:54:37.91387 [t1] acceptTimeout=Some(30 minutes)
+pid:25967 2026-08-17T20:54:37.922865 [t1] server file locked
+pid:25967 2026-08-17T20:54:37.945805 [t1] listening on port 60289
+pid:25967 2026-08-17T20:54:37.977585 [t1] handling run for Socket[addr=/127.0.0.1,port=60290,localport=60289]
+pid:25967 2026-08-17T20:54:37.982816 [t30] prepareConnection Socket[addr=/127.0.0.1,port=60290,localport=60289]
+pid:25967 2026-08-17T20:54:37.989238 [t30] 1 active connections
+pid:25967 2026-08-17T20:54:37.99364 [t31] handleConnection: starting RPC server
+pid:25967 2026-08-17T20:54:38.017952 [t31] handleConnection: running RPC server
+pid:25967 2026-08-17T20:54:38.021501 [t31] [MillDaemon-Socket[addr=/127.0.0.1,port=60290,localport=60289]] Initializing Mill RPC server... Waiting for the `initialize` message.
+pid:25967 2026-08-17T20:54:38.05761 [t31] [MillDaemon-Socket[addr=/127.0.0.1,port=60290,localport=60289]] Initialized, waiting for messages.
+pid:25967 2026-08-17T20:54:38.106017 [t30] done=false, idle=true, lastClientAlive=false
+pid:25967 2026-08-17T20:54:38.105006 [t31] [MillDaemon-Socket[addr=/127.0.0.1,port=60290,localport=60289]] Transport wire broken.
+pid:25967 2026-08-17T20:54:38.109811 [t31] handleConnection: RPC server finished normally, exitCode=0
+pid:25967 2026-08-17T20:54:38.110166 [t30] 0 active connections

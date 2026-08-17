@@ -1,0 +1,19 @@
+2026-08-17T18:54:37Z launchOrConnectToServer: mill.client.lock.Locks@41488b16
+2026-08-17T18:54:37Z Acquiring the launcher lock: PidLock{@6c7a164b, path='/Users/oluies/projects/crack/out/mill-daemon/launcherLock'}
+2026-08-17T18:54:37Z launchOrConnectToServer attempt
+2026-08-17T18:54:37Z Checking if the daemon lock is available: PidLock{@81d9a72, path='/Users/oluies/projects/crack/out/mill-daemon/daemonLock'}
+2026-08-17T18:54:37Z The daemon lock is available, starting the server.
+2026-08-17T18:54:37Z The server has started: OsProcess(25967)
+2026-08-17T18:54:37Z Waiting for the server to take the daemon lock: PidLock{@81d9a72, path='/Users/oluies/projects/crack/out/mill-daemon/daemonLock'}
+2026-08-17T18:54:37Z The server OsProcess(25967) has taken the daemon lock: PidLock{@81d9a72, path='/Users/oluies/projects/crack/out/mill-daemon/daemonLock'}
+2026-08-17T18:54:37Z Reading server port: /Users/oluies/projects/crack/out/mill-daemon
+2026-08-17T18:54:37Z launchOrConnectToServer attempt
+2026-08-17T18:54:37Z Checking if the daemon lock is available: PidLock{@81d9a72, path='/Users/oluies/projects/crack/out/mill-daemon/daemonLock'}
+2026-08-17T18:54:37Z The daemon lock is not available, there is already a server running.
+2026-08-17T18:54:37Z Trying to read the process ID of a running daemon from /Users/oluies/projects/crack/out/mill-daemon/processId
+2026-08-17T18:54:37Z Read PID: 25967
+2026-08-17T18:54:37Z Reading server port: /Users/oluies/projects/crack/out/mill-daemon
+2026-08-17T18:54:37Z Read server port
+2026-08-17T18:54:37Z Connecting: 60289
+2026-08-17T18:54:37Z runWithConnection (RPC): Launched(60289,Some(Socket[addr=localhost/127.0.0.1,port=60289,localport=60290]),OsProcess(25967))
+2026-08-17T18:54:38Z runWithConnection exit code: 0

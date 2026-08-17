@@ -212,6 +212,37 @@ expect_fail "a null inside fx rates" "verify 11" \
 expect_fail "week axes disagree" "verify 12" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"weeks\"]=[\"1999-01-04\"]+d[\"weeks\"][1:];json.dump(d,open(\"fx.json\",\"w\"))"' export
 
+# --- the export/verify coupling guard ----------------------------------------
+#
+# check-export-paths.sh is shell, not SQL, so it needs its own cases — and it
+# needs them for the same reason as everything above: it replaced an invariant
+# that was reverted, and an untested guard is how the inert checks got in.
+
+guard() {  # $1 = namn, $2 = "fail"|"pass", $3 = out_dir, $4 = export-sql
+  local name="$1" want="$2" out
+  if out=$(pipeline/check-export-paths.sh "$ROOT" "$3" "$4" 2>&1); then
+    if [ "$want" = "pass" ]; then
+      printf 'ok    %-44s -> stays green\n' "$name"; pass=$((pass+1))
+    else
+      printf 'FAIL  %-44s did not fail at all\n' "$name"; fail=$((fail+1))
+    fi
+  else
+    if [ "$want" = "fail" ]; then
+      printf 'ok    %-44s -> %s\n' "$name" "$(printf '%s' "$out" | head -1 | cut -c1-58)"
+      pass=$((pass+1))
+    else
+      printf 'FAIL  %-44s should have stayed green\n' "$name"; fail=$((fail+1))
+    fi
+  fi
+}
+
+sed "s|TO 'site/public/data/retail.json'|TO 'nagon/annan/retail.json'|" \
+  pipeline/50_export.sql > "$TMP/export_moved.sql"
+
+guard "export paths as shipped"          pass "$ROOT/site/public/data" pipeline/50_export.sql
+guard "one COPY target redirected"       fail "$ROOT/site/public/data" "$TMP/export_moved.sql"
+guard "out_dir moved, export unchanged"  fail "$ROOT/nagon/annan"      pipeline/50_export.sql
+
 # --- the happy path must still be green --------------------------------------
 
 reset_copy

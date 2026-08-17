@@ -54,6 +54,13 @@ retry() {  # $1 = beskrivning, resten = kommandot
 
 mkdir -p "$WORK" site/public/data data/manual
 
+# Exporten skriver till strängliteraler, verifieringen läser ur out_dir. Kollas
+# före hämtningarna: ett felkonfigurerat par ska inte kosta fyra nedladdningar
+# först. Egen skript-fil så att negative.sh kan bevisa att kontrollen fäller.
+OUT_DIR="$ROOT/site/public/data"
+pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
+  || die "exporten och verifieringen pekar på olika kataloger (se ovan)"
+
 # ---------------------------------------------------------------------------
 # Download
 #
@@ -72,19 +79,16 @@ fetch_eia() {
 
   rm -f "$WORK/${prefix}"_*.json
 
-  local page=0 offset=0 out code n full
+  local page=0 offset=0 out n full
   while :; do
     out=$(printf '%s/%s_%03d.json' "$WORK" "$prefix" "$page")
     full="${url}?api_key=${EIA_API_KEY}&frequency=${freq}&data[0]=value${facets}"
     full="${full}&start=${START_WEEK}&length=5000&offset=${offset}"
     full="${full}&sort[0][column]=period&sort[0][direction]=asc"
-    # -g is mandatory: without it curl reads EIA's data[0] and facets[series][]
-    # as glob ranges and refuses the URL with "bad range in URL".
-    code=$(retry "EIA $prefix" curl -gsS -o "$out" -w '%{http_code}' "$full") \
-      || die "EIA ($prefix): curl misslyckades efter 4 försök"
-    if [ "$code" != "200" ]; then
-      die "EIA ($prefix): http $code — kontrollera EIA_API_KEY. Svar: $(head -c 300 "$out")"
-    fi
+
+    retry "EIA $prefix" eia_get "$full" "$out" \
+      || die "EIA ($prefix): hämtning misslyckades efter 4 försök (senaste svar:
+     ${LAST_CODE:-nätverksfel}). Vid 403 — kontrollera EIA_API_KEY. Svar: $(head -c 300 "$out" 2>/dev/null)"
 
     n=$(duckdb -noheader -list -c \
           "SELECT coalesce(len(response.data), 0) FROM read_json_auto('$out')") \
@@ -93,6 +97,24 @@ fetch_eia() {
     if [ "$n" -lt 5000 ]; then break; fi
     offset=$((offset + 5000)); page=$((page + 1))
   done
+}
+
+# Statuskoden måste testas INNE i den omförsökta enheten. Utan --fail avslutar
+# curl med 0 på 429/500/503, så ett omförsök på exitkod ensamt skulle bara täcka
+# nätverksfel — och det är just rate-limit och 5xx som är "servern tappade en
+# förfrågan" för ett nyckelskyddat JSON-API.
+#
+# Koden får inte heller fångas ur retry: curl skriver sin -w-sträng vid varje
+# försök, så ett misslyckat följt av ett lyckat gav "000200" och en die() som
+# skyllde på API-nyckeln.
+LAST_CODE=""
+eia_get() {  # $1 = url, $2 = utfil
+  local code
+  # -g är nödvändigt: utan det läser curl EIA:s data[0] och facets[series][]
+  # som globb-intervall och vägrar URL:en med "bad range in URL".
+  code=$(curl -gsS -o "$2" -w '%{http_code}' "$1") || { LAST_CODE=""; return 1; }
+  LAST_CODE="$code"
+  [ "$code" = "200" ]
 }
 
 fetch_ecb() {
@@ -174,14 +196,6 @@ OB_PATH="$WORK/$OB_FILE"
 # med ett fel som inte har med ändringen att göra.
 STRICT=true
 if [ "$MODE" = "fixtures" ]; then STRICT=false; fi
-
-# 50_export.sql måste skriva dit 60_verify_export.sql läser. DuckDB:s COPY ... TO
-# tar bara en strängliteral, så exporten kan inte parametriseras på out_dir och
-# kopplingen kan inte göras strukturell — den kontrolleras här i stället.
-OUT_DIR="$ROOT/site/public/data"
-grep -q "TO 'site/public/data/cracks.json'" pipeline/50_export.sql \
-  || die "50_export.sql skriver inte längre till site/public/data — uppdatera OUT_DIR
-     i run.sh så att verifieringen läser samma filer som exporten skrev."
 
 cat > "$WORK/preamble.sql" <<SQL
 .bail on

@@ -97,6 +97,7 @@ object Main:
         }
 
     div(
+      idAttr := "cracks",
       h1("Diesel crack spreads"),
       p(
         "What a refiner earns per barrel turning crude into diesel, weekly. ",
@@ -167,6 +168,7 @@ object Main:
       }
 
     div(
+      idAttr := "retail",
       h2("Retail diesel and petrol — Sweden against the EU-27 and the USA"),
       p(
         "Weekly pump prices per litre. Sweden is drawn bold, other EU members thin grey, ",
@@ -195,6 +197,7 @@ object Main:
 
   private def dualSection(c: Data.Cracks, r: Data.Retails): HtmlElement =
     div(
+      idAttr := "rockets",
       h2("Rockets and feathers — crude against the US pump"),
       p(
         "Crude benchmarks on the left axis, US retail on the right. Pump prices chase a ",
@@ -245,6 +248,13 @@ object Main:
       case Success((c, r, fx)) =>
         mount.innerHTML = ""
         render(mount, div(crackSection(c), retailSection(r, fx), dualSection(c, r), notes))
+        // Ankaret hinner inte finnas när webbläsaren försöker hoppa dit: appen
+        // renderas först när de tre JSON-filerna kommit. Utan detta gör en delad
+        // länk till #retail eller #rockets ingenting alls.
+        val hash = dom.window.location.hash
+        if hash.length > 1 then
+          Option(dom.document.getElementById(hash.drop(1)))
+            .foreach(_.scrollIntoView())
       case Failure(e) =>
         mount.innerHTML = ""
         render(

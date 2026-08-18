@@ -229,6 +229,11 @@ expect_fail "week axes disagree" "verify 12" \
 # vilket är precis den förväxling grenen lades till för att ta bort.
 guard() {  # $1 = namn, $2 = "fail"|"pass", $3 = out_dir, $4 = export-sql, $5 = text
   local name="$1" want="$2" want_msg="${5:-}" out
+  # Ett tomt mönster matchar all utdata, vilket tyst degraderar provet till en
+  # ren exitkodskontroll — samma tysta no-op som cmp- och korruptionsvakterna
+  # ovan finns för att stänga.
+  [ "$want" != "fail" ] || [ -n "$want_msg" ] \
+    || die "guard '$name': förväntat felmeddelande saknas"
   if out=$(pipeline/check-export-paths.sh "$ROOT" "$3" "$4" 2>&1); then
     if [ "$want" = "pass" ]; then
       printf 'ok    %-44s -> stays green\n' "$name"; pass=$((pass+1))
@@ -250,11 +255,13 @@ sed "s|TO '$OUT_REL/retail.json'|TO 'nagon/annan/retail.json'|" \
 # Samma krav som på korruptionerna ovan: en sed som slutat matcha gör provet
 # till en kopia, och "did not fail at all" skulle då skyllas på guarden i
 # stället för på en förlegad testfixtur.
+[ -s "$TMP/export_moved.sql" ] \
+  || die "sed gav en tom export_moved.sql — kontrollera OUT_REL och sed-uttrycket"
 cmp -s pipeline/50_export.sql "$TMP/export_moved.sql" \
   && die "sed-mönstret matchade inte längre — COPY-målet i 50_export.sql har bytt form"
 
 guard "export paths as shipped"         pass "$SRC_JSON"         pipeline/50_export.sql
-guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "retail.json"
+guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "för: retail.json"
 guard "out_dir moved, export unchanged" fail "$ROOT/nagon/annan" pipeline/50_export.sql       "nagon/annan/"
 guard "export sql does not exist"       fail "$SRC_JSON"         "$TMP/ingen_sadan_fil.sql"   "finns inte"
 
@@ -320,11 +327,53 @@ fetch_case "403 is permanent, not retried"           "403
 fetch_case "404 is permanent, not retried"           "404"        fail 404 1
 fetch_case "503 throughout gives up after 4"         "503"        fail 503 4
 
-# Oil Bulletin och ECB går genom samma http_get, så ett roterat UUID (404) ska
-# inte heller kosta fyra förfrågningar.
-fetch_case "404 on a keyless source is permanent"    "404"        fail 404 1 http_get
-fetch_case "503 on a keyless source is retried"      "503
-200"        ok   200 2 http_get
+# De riktiga funktionerna, inte http_get direkt: poängen är att fetch_ecb och
+# fetch_oilbulletin GÅR genom http_get. Ett prov som anropar http_get självt
+# förblir grönt om någon av dem återgår till curl --fail, alltså bevisar det
+# ingenting om just den ändringen.
+real_fetch_case() {  # $1 = namn, $2 = funktion, $3 = koder, $4 = förväntat antal anrop
+  local name="$1" fn="$2" codes="$3" want_calls="$4"
+  local d="$TMP/stub"; rm -rf "$d"; mkdir -p "$d"
+  printf '%s\n' "$codes" > "$d/codes"
+  cat > "$d/curl" <<'STUB'
+#!/usr/bin/env bash
+d="$(dirname "$0")"
+n=$(cat "$d/calls" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$d/calls"
+code=$(sed -n "${n}p" "$d/codes"); [ -n "$code" ] || code=$(tail -1 "$d/codes")
+# --fail måste modelleras, annars är stubben inte curl: med --fail avslutar
+# curl med 22 för varje HTTP >= 400 och skriver ingen -w-sträng. Utan detta
+# passerar ett 404-prov mot en --fail-implementation av fel skäl.
+for a in "$@"; do
+  if [ "$a" = "--fail" ] && [ "$code" -ge 400 ] 2>/dev/null; then exit 22; fi
+done
+printf '%s' "$code"
+STUB
+  chmod +x "$d/curl"
+  # duckdb stubbas: fetch_ecb räknar fram sitt startdatum med den.
+  printf '#!/bin/sh\necho 2021-12-20\n' > "$d/duckdb"; chmod +x "$d/duckdb"
+
+  # die() avslutar subskalet; räknaren ligger i fil och överlever.
+  (
+    PATH="$d:$PATH"
+    WORK="$TMP/data"; START_WEEK="2022-01-03"
+    ECB_BASE="http://x"; ECB_CURRENCIES="USD"
+    OB_URL="http://x"; OB_FILE="ob.xlsx"; OB_PAGE="http://x"
+    sleep() { :; }
+    . pipeline/lib/fetch.sh
+    "$fn"
+  ) >/dev/null 2>&1
+
+  local calls; calls=$(cat "$d/calls" 2>/dev/null || echo 0)
+  if [ "$calls" = "$want_calls" ]; then
+    printf 'ok    %-44s -> %s anrop\n' "$name" "$calls"; pass=$((pass+1))
+  else
+    printf 'FAIL  %-44s -> %s anrop, väntade %s\n' "$name" "$calls" "$want_calls"; fail=$((fail+1))
+  fi
+}
+
+real_fetch_case "fetch_ecb: 404 is permanent"         fetch_ecb         "404" 1
+real_fetch_case "fetch_ecb: 503 retried then gives up" fetch_ecb        "503" 4
+real_fetch_case "fetch_oilbulletin: rotated UUID (404)" fetch_oilbulletin "404" 1
 
 # --- the happy path must still be green --------------------------------------
 

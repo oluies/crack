@@ -27,7 +27,7 @@ ROOT="$1"; OUT_DIR="$2"; EXPORT_SQL="$3"
 REL="${OUT_DIR#"$ROOT"/}"
 
 missing=""
-for f in cracks retail fx; do
+for f in cracks retail fx usregions; do
   # -F: $REL är en sökväg, inte ett reguljärt uttryck. Ett '[' i den skulle ge
   # ett parse-fel och fälla guarden med fel förklaring; punkten i .json skulle
   # tyst matcha vilket tecken som helst.

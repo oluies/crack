@@ -40,6 +40,16 @@ object Data:
     def pick(fuel: String, tax: String): Vector[Retail] =
       series.filter(s => s.fuel == fuel && s.tax == tax)
 
+  final case class Region(
+      code: String, label: String, geo: String,
+      fuel: String, currency: String, values: Series
+  )
+  final case class Regions(meta: Meta, weeks: Vector[String], regions: Vector[Region]):
+    def pick(fuel: String): Vector[Region] = regions.filter(_.fuel == fuel)
+    /** 'state' eller 'padd' — geografin skiljer sig mellan bränslena. */
+    def geoOf(fuel: String): String =
+      if pick(fuel).forall(_.geo == "state") then "state" else "padd"
+
   final case class Fx(meta: Meta, weeks: Vector[String], usd: Vector[Double], sek: Vector[Double]):
     /**
      * Växlar ett värde för vecka `i`. Serierna publiceras i sin ursprungsvaluta
@@ -106,6 +116,18 @@ object Data:
             s.focus.asInstanceOf[Boolean],
             str(s.fuel), str(s.tax), str(s.currency), series(s.values)
           )
+        )
+      )
+    }
+
+  def usregions(base: String): Future[Regions] =
+    fetchJson(s"$base/usregions.json").map { d =>
+      Regions(
+        meta(d.meta),
+        arr(d.weeks).map(str),
+        arr(d.regions).map(x =>
+          Region(str(x.code), str(x.label), str(x.geo), str(x.fuel),
+                 str(x.currency), series(x.values))
         )
       )
     }

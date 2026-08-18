@@ -24,6 +24,9 @@ object Main:
   private val retailTax    = Var("with")       // "with" | "without"
   private val retailCcy    = Var("EUR")        // "EUR" | "USD" | "SEK"
 
+  private val usFuel = Var("gasoline")         // egen växel: sektionen står för sig
+  private val usCcy  = Var("USD")              // regional jämförelse läses bäst i USD
+
   /** Smal skärm -> färre ändetiketter. Uppdateras vid rotation och storleksbyte. */
   private val narrow = Var(dom.window.innerWidth < 640)
 
@@ -212,6 +215,47 @@ object Main:
       provenance(r.meta)
     )
 
+  private def usSection(g: Data.Regions, r: Data.Retails, fx: Data.Fx): HtmlElement =
+    div(
+      idAttr := "usregions",
+      h2("How much one country varies — US pump prices by state and region"),
+      p(
+        "The single US line on the chart above is a national average, and averages hide things. ",
+        "California against Texas is roughly a fifty-percent difference on the same fuel, and ",
+        "most of it is tax: a state levy ranging from a few cents to over sixty cents a gallon, ",
+        "on top of the federal excise."
+      ),
+      div(
+        cls := "controls",
+        toggle("Fuel", usFuel, Seq("gasoline" -> "Petrol (regular)", "diesel" -> "Diesel")),
+        toggle("Currency", usCcy, Seq("USD" -> "USD", "EUR" -> "EUR", "SEK" -> "SEK"))
+      ),
+      // Geografin är inte densamma för de två bränslena, och det ska stå där man
+      // byter bränsle — inte i en fotnot man ändå inte läser.
+      child <-- usFuel.signal.map { f =>
+        if g.geoOf(f) == "state" then
+          p(cls := "note-inline",
+            b("Nine states"), " — that is the whole of EIA's free state-level petrol coverage, ",
+            "not a selection. The other forty-one are not published weekly.")
+        else
+          p(cls := "note-inline",
+            b("Regions, not states"), " — EIA publishes weekly diesel by PADD refining region ",
+            "rather than by state. California is the one state broken out separately.")
+      },
+      chartBox(
+        usFuel.signal
+          .combineWith(usCcy.signal, narrow.signal)
+          .map { (f, c, n) =>
+            val national = r.pick(f, "with").find(_.region == "US")
+            Charts.usRegions(g, national, fx, f, c, n)
+          }
+      ),
+      p(cls := "prov",
+        "The US average is volume-weighted across the whole country, so it need not sit ",
+        "midway between the lines drawn here."),
+      provenance(g.meta)
+    )
+
   private def dualSection(c: Data.Cracks, r: Data.Retails): HtmlElement =
     div(
       idAttr := "rockets",
@@ -268,12 +312,14 @@ object Main:
         c  <- Data.cracks(DataBase)
         r  <- Data.retail(DataBase)
         fx <- Data.fx(DataBase)
-      yield (c, r, fx)
+        g  <- Data.usregions(DataBase)
+      yield (c, r, fx, g)
 
     loaded.onComplete {
-      case Success((c, r, fx)) =>
+      case Success((c, r, fx, g)) =>
         mount.innerHTML = ""
-        render(mount, div(crackSection(c), retailSection(r, fx), dualSection(c, r), notes))
+        render(mount, div(crackSection(c), retailSection(r, fx),
+                          usSection(g, r, fx), dualSection(c, r), notes))
         // Ankaret hinner inte finnas när webbläsaren försöker hoppa dit: appen
         // renderas först när de tre JSON-filerna kommit. Utan detta gör en delad
         // länk till #retail eller #rockets ingenting alls.

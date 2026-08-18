@@ -385,3 +385,79 @@ object Charts:
           pump.map((n, v, col) => line(n, v, col, 1)))*
       )
     )
+
+  // -- spridning inom USA ---------------------------------------------------
+
+  /**
+   * Delstater och PADD-regioner mot det nationella snittet. Samma bildspråk som
+   * pristabellen: referenslinjen fet, fältet tunt och grått, ändetiketter i
+   * stället för legend.
+   *
+   * Snittet är volymvägt och inte medelvärdet av de ritade linjerna — det kan
+   * alltså ligga utanför dem. Noten under diagrammet säger det.
+   */
+  def usRegions(
+      g: Data.Regions, national: Option[Data.Retail], fx: Data.Fx,
+      fuel: String, ccy: String, compact: Boolean
+  ): js.Any =
+    val regions = g.pick(fuel).sortBy(_.label)
+    val unit    = s"$ccy/L"
+
+    def conv(v: Data.Series, from: String) =
+      v.zipWithIndex.map((o, i) => o.map(x => fx.convert(x, from, ccy, i)))
+
+    // Ytterligheterna bär historien: skillnaden mellan dyrast och billigast är
+    // i huvudsak skattespridning. På smal skärm får bara de plats.
+    val ranked = regions
+      .flatMap(r => r.values.reverseIterator.flatten.nextOption().map(v => r.code -> v))
+      .sortBy(-_._2).map(_._1)
+    val labelled: Set[String] =
+      if !compact then regions.map(_.code).toSet
+      else (ranked.take(2) ++ ranked.takeRight(2)).toSet
+
+    val regionSeries = regions.map { r =>
+      obj(
+        name = r.label, `type` = "line", showSymbol = false, connectNulls = false,
+        triggerLineEvent = true, z = 2,
+        lineStyle = obj(width = 1.1, color = Other),
+        itemStyle = obj(color = Other),
+        emphasis = obj(focus = "series", lineStyle = obj(width = 2.6)),
+        blur = obj(lineStyle = obj(opacity = 0.12)),
+        endLabel = obj(show = labelled.contains(r.code), formatter = r.code,
+                       color = LabelInk, fontSize = 10, distance = 4),
+        labelLayout = obj(moveOverlap = "shiftY", hideOverlap = false),
+        data = data(conv(r.values, r.currency))
+      ): js.Object
+    }
+
+    val avgSeries = national.map { n =>
+      obj(
+        name = "US average", `type` = "line", showSymbol = false, connectNulls = false,
+        triggerLineEvent = true, z = 10,
+        lineStyle = obj(width = 2.8, color = Focus),
+        itemStyle = obj(color = Focus),
+        emphasis = obj(focus = "series", lineStyle = obj(width = 3.0)),
+        blur = obj(lineStyle = obj(opacity = 0.12)),
+        endLabel = obj(show = true, formatter = "US", color = Focus,
+                       fontSize = 12, fontWeight = "bold", distance = 4),
+        data = data(conv(n.values, n.currency))
+      ): js.Object
+    }
+
+    obj(
+      grid = gridBoxLabelled,
+      animation = false,
+      tooltip = obj(
+        trigger = "item", confine = true, position = tooltipPos,
+        textStyle = obj(fontSize = 12),
+        formatter = ((p: js.Dynamic) =>
+          val v = p.value
+          if v == null || js.isUndefined(v) then s"${p.seriesName}<br>${p.name}: –"
+          else s"<b>${p.seriesName}</b><br>${p.name}: ${fixed(v.asInstanceOf[Double], 3)} $unit"
+        ): js.Function1[js.Dynamic, String]
+      ),
+      xAxis = axisX(g.weeks),
+      yAxis = axisY(unit),
+      dataZoom = zoom,
+      series = js.Array((regionSeries ++ avgSeries.toVector)*)
+    )

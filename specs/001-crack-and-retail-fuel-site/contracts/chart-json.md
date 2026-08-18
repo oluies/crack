@@ -122,3 +122,30 @@ Conversion the frontend performs, for a value `v` in currency `c` at week `i`:
 `weeks` is identical across all three files by construction — all are left-joined
 onto `week_calendar` — which lets the frontend index by position instead of matching
 dates.
+
+## `usregions.json` (feature 002)
+
+```json
+{
+  "meta": { "...": "..." },
+  "weeks": ["2022-01-03", "..."],
+  "regions": [
+    { "code": "CA", "label": "California", "geo": "state",
+      "fuel": "gasoline", "currency": "USD", "values": [1.0231, "..."] },
+    { "code": "GC", "label": "Gulf Coast (PADD 3)", "geo": "padd",
+      "fuel": "diesel", "currency": "USD", "values": ["..."] }
+  ]
+}
+```
+
+Its own file rather than extra entries in `retail.json`: that chart filters on
+`(fuel, tax)` and would draw the states into the EU comparison.
+
+`geo` is `state` or `padd`, and differs **between fuels** — EIA publishes weekly
+petrol for nine states (its entire free state-level coverage) but diesel by PADD
+refining region, with California the one state broken out. The frontend reads
+this rather than assuming, and states which geography is on screen.
+
+Values are USD per litre, converted in the browser like every other retail
+series. There is no national-average entry here; the chart takes it from
+`retail.json` so the two charts cannot disagree about what the US average is.

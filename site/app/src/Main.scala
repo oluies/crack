@@ -195,7 +195,12 @@ object Main:
             if names.sizeIs == 1 then " is not shown here. " else " are not shown here. ",
             "The source publishes only a pump price for ",
             if names.sizeIs == 1 then "it" else "them",
-            ", which already includes tax — there is no pre-tax series to draw."
+            ", which already includes tax — there is no pre-tax series to draw. US fuel tax ",
+            "is a fixed excise per gallon (18.4¢ petrol, 24.4¢ diesel federally, plus a state ",
+            "tax that varies from a few cents to over 60¢), not a percentage, so it cannot be ",
+            "backed out of the pump price without knowing the state: ",
+            a(href := "https://en.wikipedia.org/wiki/Fuel_taxes_in_the_United_States",
+              target := "_blank", "Fuel taxes in the United States"), "."
           )
         )
       },
@@ -237,6 +242,15 @@ object Main:
         li(b("Prices are per litre"), " and stored in their native currency: EUR for the EU ",
            "Oil Bulletin, USD for EIA. The currency toggle converts at the ECB reference rate ",
            "for that same week, not one rate applied across the whole series."),
+        li(b("Why the US line sits so low."), " It is not cheaper crude — the same barrels ",
+           "feed both markets. It is tax. US fuel tax is a fixed cents-per-gallon excise: ",
+           "18.4¢/gal on petrol and 24.4¢/gal on diesel federally, plus a state tax that ",
+           "averages roughly 30¢/gal but ranges from a few cents to over 60¢. Together that ",
+           "is on the order of 0.1–0.2 EUR/L. EU member states levy excise several times ",
+           "larger and then apply VAT on top of it, which is why the gap is closer to 1 EUR/L ",
+           "than to the difference in the product itself. ",
+           a(href := "https://en.wikipedia.org/wiki/Fuel_taxes_in_the_United_States",
+             target := "_blank", "Fuel taxes in the United States"), "."),
         li(b("Gaps are gaps."), " A week with no observation is drawn as a break. Nothing is ",
            "interpolated or carried forward — except exchange rates over bank holidays, where ",
            "a rate genuinely persists until it is restated.")

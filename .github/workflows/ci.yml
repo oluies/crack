@@ -45,7 +45,7 @@ jobs:
 
       - name: Check the exports are non-trivial
         run: |
-          for f in site/public/data/cracks.json site/public/data/retail.json site/public/data/fx.json; do
+          for f in site/public/data/*.json; do
             [ -s "$f" ] || { echo "FEL: $f saknas eller är tom"; exit 1; }
             echo "$f: $(wc -c < "$f") byte"
           done

@@ -107,8 +107,21 @@ await step('NW Europe', 1);
 await step('Threshold', 1);
 await step('US (NYH)', 0);
 await step('NYH ULSD – WTI', 0);
-for (const l of ['Petrol (E95)', 'Without tax', 'SEK', 'USD', 'Diesel', 'With tax', 'EUR'])
-  await step(l);
+await step('Petrol (E95)');
+
+// Utan skatt saknar USA serie — EIA publicerar bara pumppriset, som redan
+// innehåller skatt. Noten måste namnge landet; "1 region(s) omitted" fick en
+// läsare att tro att USA-kurvan försvunnit av misstag.
+await step('Without tax');
+const note = doc.querySelector('.note-inline');
+check(!!note, 'without-tax shows an explanatory note');
+check(!!note && /United States/.test(note.textContent),
+      'the note names the country that is missing: ' + (note?.textContent ?? '').slice(0, 70));
+
+await step('With tax');
+check(!doc.querySelector('.note-inline'), 'the note disappears again with tax');
+
+for (const l of ['SEK', 'USD', 'Diesel', 'EUR']) await step(l);
 
 // Tooltipplacering. På telefon är diagrammet ~300 px högt och en axel-tooltip
 // med fyra serier lägger sig annars mitt över kurvorna man just pekade på —

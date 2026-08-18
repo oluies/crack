@@ -24,6 +24,9 @@ object Main:
   private val retailTax    = Var("with")       // "with" | "without"
   private val retailCcy    = Var("EUR")        // "EUR" | "USD" | "SEK"
 
+  /** Smal skärm -> färre ändetiketter. Uppdateras vid rotation och storleksbyte. */
+  private val narrow = Var(dom.window.innerWidth < 640)
+
   // -- byggstenar -----------------------------------------------------------
 
   private def toggle[A](label: String, v: Var[A], opts: Seq[(A, String)]): HtmlElement =
@@ -160,11 +163,14 @@ object Main:
   private def retailSection(r: Data.Retails, fx: Data.Fx): HtmlElement =
     // Antal länder som saknar pris i det valda läget — utan skatt publicerar
     // inte alla källor, och en tyst lucka vore värre än en not.
-    val missing: Signal[Int] =
+    // Vilka länder som faller bort, inte hur många. "1 region(s) omitted" fick
+    // en läsare att undra om USA-kurvan försvunnit av misstag — den ska namnge
+    // landet och säga varför.
+    val missing: Signal[Vector[String]] =
       retailFuel.signal.combineWith(retailTax.signal).map { (f, t) =>
-        val all  = r.series.map(_.cc).distinct.size
-        val here = r.pick(f, t).map(_.cc).distinct.size
-        all - here
+        val everywhere = r.series.map(s => s.cc -> s.label).distinct.toMap
+        val present    = r.pick(f, t).map(_.cc).toSet
+        everywhere.view.filterKeys(!present.contains(_)).values.toVector.sorted
       }
 
     div(
@@ -180,18 +186,24 @@ object Main:
         toggle("Tax", retailTax, Seq("with" -> "With tax", "without" -> "Without tax")),
         toggle("Currency", retailCcy, Seq("EUR" -> "EUR", "USD" -> "USD", "SEK" -> "SEK"))
       ),
-      chartBox(
-        retailFuel.signal
-          .combineWith(retailTax.signal, retailCcy.signal)
-          .map((f, t, c) => Charts.retail(r, fx, f, t, c))
-      ),
-      child.maybe <-- missing.map { n =>
-        Option.when(n > 0)(
-          p(cls := "prov",
-            s"$n region(s) omitted in this view — the source publishes no such series. " +
-              "The US retail price is a pump price and has no pre-tax equivalent.")
+      // Ovanför diagrammet, inte under: noten ska synas i samma ögonkast som
+      // reglaget man just tryckte på.
+      child.maybe <-- missing.map { names =>
+        Option.when(names.nonEmpty)(
+          p(cls := "note-inline",
+            b(names.mkString(", ")),
+            if names.sizeIs == 1 then " is not shown here. " else " are not shown here. ",
+            "The source publishes only a pump price for ",
+            if names.sizeIs == 1 then "it" else "them",
+            ", which already includes tax — there is no pre-tax series to draw."
+          )
         )
       },
+      chartBox(
+        retailFuel.signal
+          .combineWith(retailTax.signal, retailCcy.signal, narrow.signal)
+          .map((f, t, c, n) => Charts.retail(r, fx, f, t, c, n))
+      ),
       provenance(r.meta)
     )
 
@@ -251,6 +263,8 @@ object Main:
         // Ankaret hinner inte finnas när webbläsaren försöker hoppa dit: appen
         // renderas först när de tre JSON-filerna kommit. Utan detta gör en delad
         // länk till #retail eller #rockets ingenting alls.
+        dom.window.addEventListener("resize",
+          (_: dom.Event) => narrow.set(dom.window.innerWidth < 640))
         val hash = dom.window.location.hash
         if hash.length > 1 then
           Option(dom.document.getElementById(hash.drop(1)))

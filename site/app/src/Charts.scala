@@ -24,6 +24,8 @@ object Charts:
   val Above  = "#1a9850" // över tröskel  (RdYlGn-ändpunkt)
   val Below  = "#d73027" // under tröskel
   val Spread = Vector("#2e6fd6", "#9c6b3f", "#4dc4d4")
+  /** Ändetiketter för de grå linjerna: mörkare än linjen, annars oläsliga. */
+  val LabelInk = "#8a97a8"
 
   /** Publicerade US-retailpriser är USD/L; dubbelaxeldiagrammet visar USD/gal. */
   private val LitresPerGallon = 3.785411784
@@ -95,14 +97,33 @@ object Charts:
   private def gridBox: js.Object =
     obj(left = 58, right = 62, top = 30, bottom = 58, containLabel = false)
 
+  /** Retail behöver bredare högermarginal: landskoder står vid linjeslutet. */
+  private def gridBoxLabelled: js.Object =
+    obj(left = 58, right = 86, top = 30, bottom = 58, containLabel = false)
+
+  /**
+   * Med legend måste rutan börja längre ned. Axelnamnet ritas nameGap (15 px)
+   * ovanför rutans överkant, alltså på y=15 med top=30 — mitt i legenden, som
+   * står på y=0. På en bred skärm råkar de ligga isär i sidled; på en telefon
+   * skriver "USD/bbl" rakt över "Brent". Rapporterat från iPhone.
+   */
+  private def gridBoxLegend: js.Object =
+    obj(left = 58, right = 62, top = 62, bottom = 58, containLabel = false)
+
+  /** Kompakt och rullbar: fyra serienamn får inte plats på en rad vid 360 px. */
+  private def legendBox: js.Object = obj(
+    top = 0, `type` = "scroll", icon = "roundRect",
+    itemWidth = 14, itemHeight = 3, itemGap = 12,
+    textStyle = obj(color = Muted, fontSize = 11)
+  )
+
   // -- crack: linjeläge -----------------------------------------------------
 
   def crackLine(d: Data.Cracks, region: String): js.Any =
     val ss = d.spreads(region)
     obj(
-      grid = gridBox,
-      legend = obj(top = 0, icon = "roundRect", itemWidth = 14, itemHeight = 3,
-                   textStyle = obj(color = Muted, fontSize = 12)),
+      grid = gridBoxLegend,
+      legend = legendBox,
       tooltip = obj(
         trigger = "axis", confine = true, position = tooltipPos,
         textStyle = obj(fontSize = 12),
@@ -219,7 +240,8 @@ object Charts:
    */
   def retail(
       r: Data.Retails, fx: Data.Fx,
-      fuel: String, tax: String, ccy: String
+      fuel: String, tax: String, ccy: String,
+      compact: Boolean
   ): js.Any =
     val picked  = r.pick(fuel, tax)
     val grey    = picked.filter(s => !s.focus && s.region != "US")
@@ -229,8 +251,24 @@ object Charts:
     def colorOf(s: Data.Retail) =
       if s.focus then Focus else if s.region == "US" then Usa else Other
 
+    /**
+     * Vilka linjer som får ändetikett. Alla 28 kräver ~280 px höjd med shiftY,
+     * och en telefonruta är ~212 px — resten trycks ut under rutan och lägger
+     * sig över zoom-reglaget. På smal skärm märks därför bara Sverige, USA och
+     * ytterlägena; de säger var man befinner sig i fältet, vilket är poängen.
+     */
+    val labelled: Set[String] =
+      if !compact then picked.map(_.cc).toSet
+      else
+        val ranked = picked
+          .flatMap(s => s.values.reverseIterator.flatten.nextOption().map(v => s.cc -> v))
+          .sortBy(-_._2)
+          .map(_._1)
+        (picked.filter(s => s.focus || s.region == "US").map(_.cc)
+          ++ ranked.take(2) ++ ranked.takeRight(2)).toSet
+
     obj(
-      grid = gridBox,
+      grid = gridBoxLabelled,
       // Ingen animering: ett byte av bränsle/skatt/valuta ritar om 28 serier, och
       // på telefon är övergången det dyraste som händer.
       animation = false,
@@ -264,16 +302,26 @@ object Charts:
             triggerLineEvent = true,
             z = if s.focus then 10 else if s.region == "US" then 8 else 2,
             lineStyle = obj(
-              width = if s.focus then 2.6 else if s.region == "US" then 1.8 else 0.9,
+              // 0.9 var för tunt för att träffa med ett finger; hover var enda
+              // sättet att få reda på landet och på telefon finns ingen hover.
+              width = if s.focus then 2.8 else if s.region == "US" then 2.0 else 1.1,
               color = colorOf(s),
               `type` = if s.region == "US" then "dashed" else "solid"
             ),
             itemStyle = obj(color = colorOf(s)),
             emphasis = obj(focus = "series", lineStyle = obj(width = 2.6)),
             blur = obj(lineStyle = obj(opacity = 0.12)),
-            // Bara de två serier som ska gå att hitta utan legend får ändetikett.
-            endLabel = obj(show = s.focus || s.region == "US", formatter = s.cc,
-                           color = colorOf(s), fontSize = 11, distance = 4),
+            // Landskod vid linjens slut för ALLA länder, inte bara Sverige och
+            // USA. En legend med 28 poster är oläslig och att peka på en enskild
+            // linje går inte på en telefon, så etiketten måste stå där hela
+            // tiden. labelLayout nedan skjuter isär dem som krockar.
+            endLabel = obj(
+              show = labelled.contains(s.cc), formatter = s.cc, distance = 4,
+              color = if s.focus || s.region == "US" then colorOf(s) else LabelInk,
+              fontSize = if s.focus || s.region == "US" then 12 else 10,
+              fontWeight = if s.focus || s.region == "US" then "bold" else "normal"
+            ),
+            labelLayout = obj(moveOverlap = "shiftY", hideOverlap = false),
             data = data(vals)
           ): js.Object
         }*
@@ -310,9 +358,8 @@ object Charts:
     ): js.Object
 
     obj(
-      grid = gridBox,
-      legend = obj(top = 0, icon = "roundRect", itemWidth = 14, itemHeight = 3,
-                   textStyle = obj(color = Muted, fontSize = 12)),
+      grid = gridBoxLegend,
+      legend = legendBox,
       tooltip = obj(
         trigger = "axis", confine = true, position = tooltipPos,
         textStyle = obj(fontSize = 12),

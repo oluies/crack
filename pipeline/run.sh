@@ -96,6 +96,14 @@ case "$MODE" in
     say "VARNING: crack-serierna blir påhittade. Publicera aldrig detta bygge."
     rm -f "$WORK"/eia_*.json
     cp data/fixtures/eia_*.json "$WORK/" || die "EIA-fixtures saknas i data/fixtures/"
+    # En ny EIA-hämtning utan motsvarande fixtur gav tidigare ett obegripligt
+    # "No files found that match the pattern .../eia_region_*.json" från DuckDB,
+    # långt från orsaken. Kontrollera prefixen här i stället.
+    for pfx in eia_spot eia_retail eia_region; do
+      ls "$WORK/${pfx}"_*.json >/dev/null 2>&1 \
+        || die "fixtur saknas för $pfx. Lägg en data/fixtures/${pfx}_000.json med samma
+     {response:{data:[...]}}-form som EIA svarar med — se data/fixtures/README.md."
+    done
     fetch_ecb
     fetch_oilbulletin
     ;;

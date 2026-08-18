@@ -12,7 +12,7 @@
 An EIA API key, free from <https://www.eia.gov/opendata/register.php>.
 
 ```bash
-security add-generic-password -a "$USER" -s EIA_API_KEY -w   # macOS Keychain
+security add-generic-password -a "$USER" -s EIA_API_KEY -w   # macOS login keychain
 export EIA_API_KEY=...                                       # or the environment
 echo 'EIA_API_KEY=...' > .env                                # or .env (gitignored)
 ```
@@ -21,6 +21,12 @@ echo 'EIA_API_KEY=...' > .env                                # or .env (gitignor
 a key in cleartext on disk is a key that eventually lands in a commit or a backup.
 The first Keychain read may raise a macOS permission prompt — "Always Allow" makes
 it silent thereafter.
+
+It must be the **login keychain**, via the command above. Saving the key in the
+macOS Passwords app instead puts it in the iCloud-backed store, which `security(1)`
+cannot read — `security list-keychains` shows only `login.keychain-db` and
+`System.keychain` — so the pipeline will report the key as missing however plainly
+it appears in Passwords.
 
 ## Run the pipeline
 

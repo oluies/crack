@@ -5,6 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Crack spreads &amp; pump prices</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script>
+    // Fel syns på sidan, inte bara i konsolen. På en telefon finns ingen konsol
+    // att öppna, och "diagrammet kraschar" är inte en felrapport man kan agera
+    // på. Laddas före app.js så att även ett fel under uppstarten fångas.
+    (function () {
+      var seen = [];
+      function show(msg) {
+        if (seen.indexOf(msg) >= 0) return;
+        seen.push(msg);
+        var b = document.getElementById('errbar');
+        if (!b) {
+          b = document.createElement('div');
+          b.id = 'errbar';
+          document.body.insertBefore(b, document.body.firstChild);
+        }
+        b.textContent = 'Fel (kopiera hit): ' + seen.join('  |  ');
+      }
+      window.addEventListener('error', function (e) {
+        show((e.message || 'okänt fel') + ' @ ' +
+             ((e.filename || '').split('/').pop()) + ':' + (e.lineno || '?'));
+      });
+      window.addEventListener('unhandledrejection', function (e) {
+        var r = e.reason;
+        show('promise: ' + ((r && (r.message || r.toString())) || 'okänd'));
+      });
+    })();
+  </script>
   <style>
     body { font-family: -apple-system, system-ui, sans-serif; margin: 0 auto;
            max-width: 1100px; padding: 0 16px 40px; color: #222; }
@@ -40,6 +67,19 @@
     .group input[type=range] { width: 160px; }
 
     .chart { width: 100%; height: 380px; }
+    #errbar { background: #fff7ed; border: 1px solid #c0392b; color: #c0392b;
+              border-radius: 6px; padding: 8px 12px; margin: 10px 0;
+              font-size: 13px; line-height: 1.45; white-space: pre-wrap;
+              word-break: break-word; }
+
+    /* Telefon: lägre diagram och luftigare reglage, annars tar de tre
+       diagrammen hela skärmen och knapparna blir för små att träffa. */
+    @media (max-width: 640px) {
+      .chart, .empty { height: 300px; }
+      .controls { gap: 12px; }
+      .group button { padding: 5px 11px; }
+      h1 { font-size: 18px; }
+    }
     .empty { display: flex; align-items: center; justify-content: center;
              height: 380px; padding: 0 40px; text-align: center; color: #666;
              background: #f7f9fc; border: 1px dashed #c9d2e0; border-radius: 8px;

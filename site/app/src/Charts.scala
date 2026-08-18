@@ -78,7 +78,7 @@ object Charts:
       legend = obj(top = 0, icon = "roundRect", itemWidth = 14, itemHeight = 3,
                    textStyle = obj(color = Muted, fontSize = 12)),
       tooltip = obj(
-        trigger = "axis",
+        trigger = "axis", confine = true,
         axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
         formatter = ((ps: js.Array[js.Dynamic]) =>
           val head = ps.headOption.map(p => s"<b>${p.axisValue}</b>").getOrElse("")
@@ -122,7 +122,7 @@ object Charts:
     obj(
       grid = gridBox,
       tooltip = obj(
-        trigger = "axis",
+        trigger = "axis", confine = true,
         axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
         formatter = ((ps: js.Array[js.Dynamic]) =>
           ps.headOption.fold("") { p =>
@@ -203,8 +203,14 @@ object Charts:
 
     obj(
       grid = gridBox,
+      // Ingen animering: ett byte av bränsle/skatt/valuta ritar om 28 serier, och
+      // på telefon är övergången det dyraste som händer.
+      animation = false,
       tooltip = obj(
         trigger = "item",
+        // confine: utan det kan tooltipen ritas utanför behållaren och tvinga
+        // fram vågrät sidscroll på en smal skärm.
+        confine = true,
         formatter = ((p: js.Dynamic) =>
           val v = p.value
           if v == null || js.isUndefined(v) then s"${p.seriesName}<br>${p.name}: –"
@@ -222,6 +228,11 @@ object Charts:
           obj(
             name = s.label, `type` = "line",
             showSymbol = false, connectNulls = false,
+            // Utan detta går landet inte att identifiera: showSymbol=false gör
+            // att det inte finns någon punkt att peka på, och en item-tooltip
+            // utlöses bara av en punkt — linjen lyfts fram men säger inte vilket
+            // land den är. triggerLineEvent låter själva linjen utlösa den.
+            triggerLineEvent = true,
             z = if s.focus then 10 else if s.region == "US" then 8 else 2,
             lineStyle = obj(
               width = if s.focus then 2.6 else if s.region == "US" then 1.8 else 0.9,
@@ -274,7 +285,7 @@ object Charts:
       legend = obj(top = 0, icon = "roundRect", itemWidth = 14, itemHeight = 3,
                    textStyle = obj(color = Muted, fontSize = 12)),
       tooltip = obj(
-        trigger = "axis",
+        trigger = "axis", confine = true,
         axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
         // Per serie-enhet, inte en delad: vänster axel är fat, höger gallon.
         formatter = ((ps: js.Array[js.Dynamic]) =>

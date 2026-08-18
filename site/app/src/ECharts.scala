@@ -14,6 +14,10 @@ import scala.scalajs.js.annotation.*
 @JSGlobal("echarts")
 object ECharts extends js.Object:
   def init(el: dom.Element): EChartsInstance = js.native
+  /** Med opts: useDirtyRect begränsar omritningen till det som faktiskt ändrats,
+    * vilket är skillnaden mellan segt och obrukbart på telefon när ett tryck
+    * försätter 27 av 28 serier i blur-läge. */
+  def init(el: dom.Element, theme: js.Any, opts: js.Any): EChartsInstance = js.native
 
 @js.native
 trait EChartsInstance extends js.Object:

@@ -50,7 +50,9 @@ object Main:
     div(
       cls := "chart",
       onMountBind { ctx =>
-        val c = ECharts.init(ctx.thisNode.ref)
+        // useDirtyRect: ett tryck i pristabellen försätter 27 av 28 serier i
+        // blur-läge, och utan partiell omritning ritas hela duken om varje gång.
+        val c = ECharts.init(ctx.thisNode.ref, null, js.Dynamic.literal(useDirtyRect = true))
         chart = Some(c)
         val h: js.Function1[dom.Event, Unit] = (_: dom.Event) => c.resize()
         dom.window.addEventListener("resize", h)

@@ -39,6 +39,32 @@ object Charts:
     s.foreach(o => a.push(o.map(v => v: js.Any).orNull))
     a
 
+  /**
+   * Var tooltipen hamnar. På en telefon är diagrammet ~300 px högt, och en
+   * axel-tooltip med fyra serier lägger sig då mitt över kurvorna man just
+   * försökte läsa — confine håller den innanför behållaren, vilket är precis
+   * varför den täcker grafen i stället för att flöda utanför.
+   *
+   * Smal skärm: fäst upptill, på motsatt sida om fingret, så att ytan man pekar
+   * på förblir synlig. Bred skärm: följ pekaren som vanligt, men klipp alltid
+   * innanför kanten.
+   */
+  private def tooltipPos: js.Function5[js.Array[Double], js.Any, js.Any, js.Any, js.Dynamic, js.Array[Double]] =
+    (pt, _, _, _, size) =>
+      val view    = size.viewSize.asInstanceOf[js.Array[Double]]
+      val content = size.contentSize.asInstanceOf[js.Array[Double]]
+      val (cw, ch) = (view(0), view(1))
+      val (tw, th) = (content(0), content(1))
+      if cw >= 640 then
+        var x = pt(0) + 14
+        var y = pt(1) + 14
+        if x + tw > cw then x = pt(0) - tw - 14
+        if y + th > ch then y = ch - th - 4
+        js.Array(math.max(4.0, x), math.max(4.0, y))
+      else
+        // Fingret till vänster -> tooltipen till höger, och tvärtom.
+        js.Array(if pt(0) < cw / 2 then math.max(4.0, cw - tw - 6) else 6.0, 6.0)
+
   private def axisX(weeks: Vector[String]): js.Object = obj(
     `type` = "category",
     data = js.Array(weeks*),
@@ -78,7 +104,8 @@ object Charts:
       legend = obj(top = 0, icon = "roundRect", itemWidth = 14, itemHeight = 3,
                    textStyle = obj(color = Muted, fontSize = 12)),
       tooltip = obj(
-        trigger = "axis", confine = true,
+        trigger = "axis", confine = true, position = tooltipPos,
+        textStyle = obj(fontSize = 12),
         axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
         formatter = ((ps: js.Array[js.Dynamic]) =>
           val head = ps.headOption.map(p => s"<b>${p.axisValue}</b>").getOrElse("")
@@ -122,7 +149,8 @@ object Charts:
     obj(
       grid = gridBox,
       tooltip = obj(
-        trigger = "axis", confine = true,
+        trigger = "axis", confine = true, position = tooltipPos,
+        textStyle = obj(fontSize = 12),
         axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
         formatter = ((ps: js.Array[js.Dynamic]) =>
           ps.headOption.fold("") { p =>
@@ -210,7 +238,8 @@ object Charts:
         trigger = "item",
         // confine: utan det kan tooltipen ritas utanför behållaren och tvinga
         // fram vågrät sidscroll på en smal skärm.
-        confine = true,
+        confine = true, position = tooltipPos,
+        textStyle = obj(fontSize = 12),
         formatter = ((p: js.Dynamic) =>
           val v = p.value
           if v == null || js.isUndefined(v) then s"${p.seriesName}<br>${p.name}: –"
@@ -285,7 +314,8 @@ object Charts:
       legend = obj(top = 0, icon = "roundRect", itemWidth = 14, itemHeight = 3,
                    textStyle = obj(color = Muted, fontSize = 12)),
       tooltip = obj(
-        trigger = "axis", confine = true,
+        trigger = "axis", confine = true, position = tooltipPos,
+        textStyle = obj(fontSize = 12),
         axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
         // Per serie-enhet, inte en delad: vänster axel är fat, höger gallon.
         formatter = ((ps: js.Array[js.Dynamic]) =>

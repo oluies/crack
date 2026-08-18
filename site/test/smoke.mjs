@@ -110,6 +110,23 @@ await step('NYH ULSD – WTI', 0);
 for (const l of ['Petrol (E95)', 'Without tax', 'SEK', 'USD', 'Diesel', 'With tax', 'EUR'])
   await step(l);
 
+// Tooltipplacering. På telefon är diagrammet ~300 px högt och en axel-tooltip
+// med fyra serier lägger sig annars mitt över kurvorna man just pekade på —
+// rapporterat från iPhone på "rockets and feathers".
+const chartNames = ['crack', 'retail', 'rockets'];
+[...doc.querySelectorAll('.chart')].forEach((d, i) => {
+  const inst = echarts.getInstanceByDom(d);
+  const pos = [].concat(inst.getOption().tooltip)[0].position;
+  if (typeof pos !== 'function') { check(false, `${chartNames[i]}: tooltip has no position function`); return; }
+  const size = (cw, ch, tw, th) => ({ viewSize: [cw, ch], contentSize: [tw, th] });
+  const L = pos([50, 200], null, null, null, size(360, 300, 200, 90));
+  const R = pos([300, 200], null, null, null, size(360, 300, 200, 90));
+  const C = pos([880, 360], null, null, null, size(900, 380, 200, 90));
+  check(L[1] === 6 && R[1] === 6, `${chartNames[i]}: phone tooltip pinned to the top`);
+  check(L[0] > R[0], `${chartNames[i]}: phone tooltip sits opposite the finger`);
+  check(C[0] + 200 <= 900 && C[1] + 90 <= 380, `${chartNames[i]}: desktop tooltip stays inside`);
+});
+
 server.close();
 console.log(fails.length ? `\n${fails.length} FAILED` : '\nalla rökprov gröna');
 process.exit(fails.length ? 1 : 0);

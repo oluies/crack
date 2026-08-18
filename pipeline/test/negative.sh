@@ -24,13 +24,19 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 ROOT="$PWD"
 SRC_DB="$ROOT/data/work/crack.duckdb"
-SRC_JSON="$ROOT/site/public/data"
+
+# Härlett, inte hårdkodat: run.sh:s guard lovar att OUT_DIR är enda ratten, och
+# ett test som duplicerar sökvägen gör tre falska diagnoser av en korrekt
+# omkonfiguration — i just den fil vars syfte är att inget ska rapportera fel sak.
+OUT_REL=$(sed -n 's|^OUT_DIR="\$ROOT/\(.*\)"$|\1|p' pipeline/run.sh)
+SRC_JSON="$ROOT/$OUT_REL"
 
 die() { echo "FEL: $*" >&2; exit 2; }
 
 # Varje förutsättning kontrolleras med egen diagnos. Utan detta blir ett saknat
 # python3 tio rader "did not fail at all" — alltså exakt den falskt gröna
 # rapporten filen finns för att omöjliggöra.
+[ -n "$OUT_REL" ]              || die "kunde inte läsa OUT_DIR ur pipeline/run.sh"
 [ -f "$SRC_DB" ]               || die "$SRC_DB saknas — kör pipeline/run.sh --fixtures först"
 [ -f "$SRC_JSON/cracks.json" ] || die "$SRC_JSON/cracks.json saknas — kör pipeline/run.sh --fixtures först"
 [ -f "$SRC_JSON/retail.json" ] || die "$SRC_JSON/retail.json saknas"
@@ -218,25 +224,28 @@ expect_fail "week axes disagree" "verify 12" \
 # needs them for the same reason as everything above: it replaced an invariant
 # that was reverted, and an untested guard is how the inert checks got in.
 
-guard() {  # $1 = namn, $2 = "fail"|"pass", $3 = out_dir, $4 = export-sql
-  local name="$1" want="$2" out
+# $5 = förväntat textfragment i felet. Utan det är guardens två felgrenar
+# omöjliga att skilja åt, och en ny gren kan passera på en annans exitkod —
+# vilket är precis den förväxling grenen lades till för att ta bort.
+guard() {  # $1 = namn, $2 = "fail"|"pass", $3 = out_dir, $4 = export-sql, $5 = text
+  local name="$1" want="$2" want_msg="${5:-}" out
   if out=$(pipeline/check-export-paths.sh "$ROOT" "$3" "$4" 2>&1); then
     if [ "$want" = "pass" ]; then
       printf 'ok    %-44s -> stays green\n' "$name"; pass=$((pass+1))
     else
       printf 'FAIL  %-44s did not fail at all\n' "$name"; fail=$((fail+1))
     fi
+  elif [ "$want" != "fail" ]; then
+    printf 'FAIL  %-44s should have stayed green\n' "$name"; fail=$((fail+1))
+  elif ! printf '%s' "$out" | grep -qF "$want_msg"; then
+    printf 'FAIL  %-44s failed, but not with "%s"\n      got: %s\n' \
+      "$name" "$want_msg" "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
   else
-    if [ "$want" = "fail" ]; then
-      printf 'ok    %-44s -> %s\n' "$name" "$(printf '%s' "$out" | head -1 | cut -c1-58)"
-      pass=$((pass+1))
-    else
-      printf 'FAIL  %-44s should have stayed green\n' "$name"; fail=$((fail+1))
-    fi
+    printf 'ok    %-44s -> %s\n' "$name" "$want_msg"; pass=$((pass+1))
   fi
 }
 
-sed "s|TO 'site/public/data/retail.json'|TO 'nagon/annan/retail.json'|" \
+sed "s|TO '$OUT_REL/retail.json'|TO 'nagon/annan/retail.json'|" \
   pipeline/50_export.sql > "$TMP/export_moved.sql"
 # Samma krav som på korruptionerna ovan: en sed som slutat matcha gör provet
 # till en kopia, och "did not fail at all" skulle då skyllas på guarden i
@@ -244,9 +253,10 @@ sed "s|TO 'site/public/data/retail.json'|TO 'nagon/annan/retail.json'|" \
 cmp -s pipeline/50_export.sql "$TMP/export_moved.sql" \
   && die "sed-mönstret matchade inte längre — COPY-målet i 50_export.sql har bytt form"
 
-guard "export paths as shipped"          pass "$ROOT/site/public/data" pipeline/50_export.sql
-guard "one COPY target redirected"       fail "$ROOT/site/public/data" "$TMP/export_moved.sql"
-guard "out_dir moved, export unchanged"  fail "$ROOT/nagon/annan"      pipeline/50_export.sql
+guard "export paths as shipped"         pass "$SRC_JSON"         pipeline/50_export.sql
+guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "retail.json"
+guard "out_dir moved, export unchanged" fail "$ROOT/nagon/annan" pipeline/50_export.sql       "nagon/annan/"
+guard "export sql does not exist"       fail "$SRC_JSON"         "$TMP/ingen_sadan_fil.sql"   "finns inte"
 
 # --- the fetch retry logic ---------------------------------------------------
 #
@@ -257,8 +267,8 @@ guard "out_dir moved, export unchanged"  fail "$ROOT/nagon/annan"      pipeline/
 
 fetch_case() {  # $1 = namn, $2 = koder stubben ska ge i tur och ordning,
                 # $3 = förväntat "ok"/"fail", $4 = förväntad LAST_CODE,
-                # $5 = förväntat antal anrop
-  local name="$1" codes="$2" want="$3" want_code="$4" want_calls="$5"
+                # $5 = förväntat antal anrop, $6 = funktion (default eia_get)
+  local name="$1" codes="$2" want="$3" want_code="$4" want_calls="$5" fn="${6:-eia_get}"
 
   local d="$TMP/stub"; rm -rf "$d"; mkdir -p "$d"
   printf '%s\n' "$codes" > "$d/codes"
@@ -279,7 +289,7 @@ STUB
     # sleep stubbas bort: provet ska inte kosta 28 s backoff.
     sleep() { :; }
     . pipeline/lib/fetch.sh
-    retry "stub" eia_get "http://x" "$TMP/stub_out" >/dev/null 2>&1
+    retry "stub" "$fn" "http://x" "$TMP/stub_out" >/dev/null 2>&1
     printf '%s|%s' "$?" "$LAST_CODE"
   )
   rc="${out%%|*}"; code="${out##*|}"
@@ -309,6 +319,12 @@ fetch_case "403 is permanent, not retried"           "403
 200"        fail 403 1
 fetch_case "404 is permanent, not retried"           "404"        fail 404 1
 fetch_case "503 throughout gives up after 4"         "503"        fail 503 4
+
+# Oil Bulletin och ECB går genom samma http_get, så ett roterat UUID (404) ska
+# inte heller kosta fyra förfrågningar.
+fetch_case "404 on a keyless source is permanent"    "404"        fail 404 1 http_get
+fetch_case "503 on a keyless source is retried"      "503
+200"        ok   200 2 http_get
 
 # --- the happy path must still be green --------------------------------------
 

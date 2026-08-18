@@ -40,22 +40,30 @@ retry() {  # $1 = beskrivning, resten = kommandot
 # Koden får inte heller fångas ur retry: curl skriver sin -w-sträng vid varje
 # försök, så ett misslyckat följt av ett lyckat gav "000200" och en die() som
 # skyllde på API-nyckeln.
+# Gemensam för alla tre källorna. --fail duger inte: curl ger exitkod 22 för
+# varje HTTP >= 400, så retry kan inte skilja en tillfällig 503 från ett
+# permanent 404 — och ett roterat Oil-Bulletin-UUID, som är just den väntade
+# felkällan där, kostade fyra förfrågningar och 28 s backoff mot en server som
+# svarade 404 direkt, fyra gånger.
 LAST_CODE=""
-eia_get() {  # $1 = url, $2 = utfil
+http_get() {  # $1 = url, $2 = utfil, resten = extra curl-flaggor
+  local url="$1" out="$2"; shift 2
   local code
-  # -g är nödvändigt: utan det läser curl EIA:s data[0] och facets[series][]
-  # som globb-intervall och vägrar URL:en med "bad range in URL".
-  code=$(curl -gsS -o "$2" -w '%{http_code}' "$1") || { LAST_CODE=""; return 1; }
+  code=$(curl -sS "$@" -o "$out" -w '%{http_code}' "$url") || { LAST_CODE=""; return 1; }
   LAST_CODE="$code"
   case "$code" in
-    200)         return 0 ;;
-    # Permanent: fel nyckel, återkallad nyckel, flyttad rutt. Fyra identiska
-    # förfrågningar och 28 s backoff gör ingen av dem giltig, och fördröjer bara
-    # den diagnos som faktiskt hjälper.
-    401|403|404) RETRY_FATAL=1; return 1 ;;
-    *)           return 1 ;;
+    200)             return 0 ;;
+    # Permanent: fel eller återkallad nyckel, flyttad rutt, roterat UUID. Fyra
+    # identiska förfrågningar gör ingen av dem giltig och fördröjer bara den
+    # diagnos som faktiskt hjälper.
+    401|403|404|410) RETRY_FATAL=1; return 1 ;;
+    *)               return 1 ;;
   esac
 }
+
+# -g är nödvändigt för EIA: utan det läser curl data[0] och facets[series][]
+# som globb-intervall och vägrar URL:en med "bad range in URL".
+eia_get() { http_get "$1" "$2" -g; }
 
 # EIA sidindelar vid 5000 rader. Tre dagliga serier över fyra år är ~3600, så
 # det är en sida idag; loopen finns för att ett längre fönster inte ska tystna
@@ -102,18 +110,21 @@ fetch_ecb() {
     || die "ECB: kunde inte räkna fram startdatum"
 
   for ccy in $ECB_CURRENCIES; do
-    retry "ECB $ccy" curl -sS -o "$WORK/ecb_${ccy}.csv" --fail \
+    retry "ECB $ccy" http_get \
       "${ECB_BASE}/D.${ccy}.EUR.SP00.A?format=csvdata&startPeriod=${from}" \
-      || die "ECB ($ccy): nedladdning misslyckades efter 4 försök"
+      "$WORK/ecb_${ccy}.csv" \
+      || die "ECB ($ccy): svar ${LAST_CODE:-nätverksfel}$(
+                [ "${RETRY_FATAL:-0}" = 1 ] && printf ' (permanent)' || printf ' efter 4 försök')"
     say "ECB $ccy: $(wc -l < "$WORK/ecb_${ccy}.csv") rader"
   done
 }
 
 fetch_oilbulletin() {
-  retry "Oil Bulletin" curl -sSL -o "$WORK/$OB_FILE" --fail "$OB_URL" \
-    || die "Oil Bulletin: nedladdning misslyckades efter 4 försök. Om servern svarar
-     men filen inte kommer: UUID:t roteras när kommissionen republicerar — hämta
-     det aktuella från $OB_PAGE och uppdatera OB_UUID i pipeline/sources.env."
+  retry "Oil Bulletin" http_get "$OB_URL" "$WORK/$OB_FILE" -L \
+    || die "Oil Bulletin: svar ${LAST_CODE:-nätverksfel}$(
+              [ "${RETRY_FATAL:-0}" = 1 ] && printf ' (permanent)' || printf ' efter 4 försök').
+     Vid 404: UUID:t roteras när kommissionen republicerar — hämta det aktuella
+     från $OB_PAGE och uppdatera OB_UUID i pipeline/sources.env."
   # Ett omutfärdat UUID serveras ofta som en HTML-felsida med HTTP 200, vilket
   # annars når read_xlsx som ett obegripligt parse-fel.
   case "$(file -b --mime-type "$WORK/$OB_FILE")" in

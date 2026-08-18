@@ -21,7 +21,8 @@ const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json' };
 
 for (const required of ['public/app.js', 'public/data/cracks.json',
-                        'public/data/retail.json', 'public/data/fx.json']) {
+                        'public/data/retail.json', 'public/data/fx.json',
+                        'public/data/usregions.json']) {
   if (!fs.existsSync(path.join(SITE, required))) {
     console.error(`saknas: site/${required} — kör ./mill site.bundleFast och pipeline/run.sh först`);
     process.exit(2);
@@ -77,21 +78,22 @@ const check = (ok, msg) => { console.log(`${ok ? 'ok  ' : 'FAIL'}  ${msg}`); if 
 
 check(doc.querySelectorAll('.failed').length === 0,
       'data loaded (no failure banner): ' + (doc.querySelector('.failed')?.textContent ?? ''));
-check(doc.querySelectorAll('.chart').length === 3, 'three charts mounted');
-check(doc.querySelectorAll('canvas').length === 3, 'three ECharts canvases');
-check(doc.querySelectorAll('.prov').length === 3, 'provenance under every chart');
-check(doc.querySelectorAll('.group button').length === 13, 'all toggles present');
+check(doc.querySelectorAll('.chart').length === 4, 'four charts mounted');
+check(doc.querySelectorAll('canvas').length === 4, 'four ECharts canvases');
+check(doc.querySelectorAll('.prov').length >= 4, 'provenance under every chart');
+check(doc.querySelectorAll('.group button').length === 18, 'all toggles present');
 check(errors.length === 0, 'no errors on first render: ' + errors.slice(0, 2).join(' | '));
 
-const click = label => {
-  const b = [...doc.querySelectorAll('.group button')].find(x => x.textContent === label);
-  if (!b) { fails.push(`missing control: ${label}`); return false; }
+const click = (label, scope) => {
+  const root = scope ? doc.querySelector(scope) : doc;
+  const b = [...root.querySelectorAll('.group button')].find(x => x.textContent === label);
+  if (!b) { fails.push(`missing control: ${label}${scope ? ' in ' + scope : ''}`); return false; }
   b.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
   return true;
 };
-const step = async (label, expectEmpty) => {
+const step = async (label, expectEmpty, scope) => {
   const before = errors.length;
-  if (!click(label)) return;
+  if (!click(label, scope)) return;
   await new Promise(r => setTimeout(r, 80));
   const empty = doc.querySelectorAll('.empty').length;
   check(errors.length === before, `"${label}" renders without error` +
@@ -113,20 +115,29 @@ await step('Petrol (E95)');
 // innehåller skatt. Noten måste namnge landet; "1 region(s) omitted" fick en
 // läsare att tro att USA-kurvan försvunnit av misstag.
 await step('Without tax');
-const note = doc.querySelector('.note-inline');
+const note = doc.querySelector('#retail .note-inline');
 check(!!note, 'without-tax shows an explanatory note');
 check(!!note && /United States/.test(note.textContent),
       'the note names the country that is missing: ' + (note?.textContent ?? '').slice(0, 70));
 
 await step('With tax');
-check(!doc.querySelector('.note-inline'), 'the note disappears again with tax');
+check(!doc.querySelector('#retail .note-inline'), 'the note disappears again with tax');
 
 for (const l of ['SEK', 'USD', 'Diesel', 'EUR']) await step(l);
+
+// Regional spridning: geografin skiljer sig mellan bränslena och noten måste
+// följa med, annars läser man PADD-regioner som delstater.
+await step('Petrol (regular)', undefined, '#usregions');
+const geoNote = () => doc.querySelector('#usregions .note-inline')?.textContent ?? '';
+check(/Nine states/.test(geoNote()), 'petrol view says nine states');
+await step('Diesel', undefined, '#usregions');
+check(/Regions, not states/.test(geoNote()), 'diesel view says PADD regions, not states');
+await step('Petrol (regular)', undefined, '#usregions');
 
 // Tooltipplacering. På telefon är diagrammet ~300 px högt och en axel-tooltip
 // med fyra serier lägger sig annars mitt över kurvorna man just pekade på —
 // rapporterat från iPhone på "rockets and feathers".
-const chartNames = ['crack', 'retail', 'rockets'];
+const chartNames = ['crack', 'retail', 'usregions', 'rockets'];
 [...doc.querySelectorAll('.chart')].forEach((d, i) => {
   const inst = echarts.getInstanceByDom(d);
   const pos = [].concat(inst.getOption().tooltip)[0].position;

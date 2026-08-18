@@ -28,7 +28,8 @@
 CREATE OR REPLACE TEMP TABLE published AS
 SELECT 'cracks.json' AS f, json FROM read_json_objects(getvariable('out_dir') || '/cracks.json')
 UNION ALL SELECT 'retail.json', json FROM read_json_objects(getvariable('out_dir') || '/retail.json')
-UNION ALL SELECT 'fx.json',     json FROM read_json_objects(getvariable('out_dir') || '/fx.json');
+UNION ALL SELECT 'fx.json',     json FROM read_json_objects(getvariable('out_dir') || '/fx.json')
+UNION ALL SELECT 'usregions.json', json FROM read_json_objects(getvariable('out_dir') || '/usregions.json');
 
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 8: {} published file(s) have the wrong shape: {}',
@@ -39,9 +40,15 @@ FROM (
     CASE
       WHEN json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
-      WHEN f <> 'fx.json' AND json_type(json->'$.series') IS DISTINCT FROM 'ARRAY'
+      WHEN f = 'usregions.json' AND (json_type(json->'$.regions') IS DISTINCT FROM 'ARRAY'
+                                  OR json_array_length(json->'$.regions') = 0
+                                  OR json_type(json->'$.regions[0].values') IS DISTINCT FROM 'ARRAY')
+        THEN 'regions missing or malformed'
+      WHEN f NOT IN ('fx.json', 'usregions.json')
+           AND json_type(json->'$.series') IS DISTINCT FROM 'ARRAY'
         THEN 'series is not an array'
-      WHEN f <> 'fx.json' AND json_array_length(json->'$.series') = 0
+      WHEN f NOT IN ('fx.json', 'usregions.json')
+           AND json_array_length(json->'$.series') = 0
         THEN 'series is empty'
       -- Element keys, not just the top level. read_json unifies the struct
       -- schema across list elements, so a key absent from EVERY element leaves
@@ -120,7 +127,17 @@ WHERE rates.USD IS NULL
    OR len(list_filter(rates.USD, x -> x IS NULL)) > 0
    OR len(list_filter(rates.SEK, x -> x IS NULL)) > 0;
 
--- 12. One axis across all three files. The frontend indexes retail values into
+-- 11b. usregions.json aligned to the same axis.
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 11b: {} US region series are misaligned (weeks={}): {}',
+                    count(*), any_value(w), string_agg(code || '/' || fuel || '=' || coalesce(n::VARCHAR,'NULL'), ', ')))
+END AS "11b usregions.json aligned"
+FROM (
+  SELECT s.code AS code, s.fuel AS fuel, len(s.values) AS n, len(weeks) AS w
+  FROM (SELECT weeks, unnest(regions) AS s FROM read_json(getvariable('out_dir') || '/usregions.json'))
+) WHERE n IS NULL OR n IS DISTINCT FROM w;
+
+-- 12. One axis across all files. The frontend indexes retail values into
 --     the FX arrays by position, which is only valid if these are identical.
 --     IS DISTINCT FROM, not <>: a missing or renamed weeks key gives NULL, and
 --     NULL <> NULL is NULL, so the CASE would fall through to green on a file
@@ -129,6 +146,8 @@ SELECT CASE WHEN (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks
                  IS DISTINCT FROM (SELECT weeks FROM read_json(getvariable('out_dir') || '/retail.json'))
              OR (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json'))
                  IS DISTINCT FROM (SELECT weeks FROM read_json(getvariable('out_dir') || '/fx.json'))
+             OR (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json'))
+                 IS DISTINCT FROM (SELECT weeks FROM read_json(getvariable('out_dir') || '/usregions.json'))
              OR (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json')) IS NULL
   THEN error('verify 12: the three JSON files do not share one week axis')
 END AS "12 shared week axis";

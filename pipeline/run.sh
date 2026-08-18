@@ -81,6 +81,7 @@ case "$MODE" in
      Utan nyckel: pipeline/run.sh --fixtures bygger på syntetisk EIA-data."
     fetch_eia "$EIA_SPOT_URL"   eia_spot   daily  $EIA_SPOT_SERIES
     fetch_eia "$EIA_RETAIL_URL" eia_retail weekly $EIA_RETAIL_SERIES
+    fetch_eia "$EIA_RETAIL_URL" eia_region weekly $EIA_REGION_SERIES
     fetch_ecb
     fetch_oilbulletin
     ;;
@@ -147,6 +148,7 @@ duckdb "$DB" \
   -f "$WORK/preamble.sql" \
   -f pipeline/00_schema.sql \
   -f pipeline/10_eia.sql \
+  -f pipeline/15_eia_regions.sql \
   -f pipeline/20_oilbulletin.sql \
   -f pipeline/30_ecb.sql \
   -f pipeline/40_cracks.sql \

@@ -18,13 +18,14 @@ draws it.
 |---|---|
 | Diesel crack spreads | NYH ULSD against Brent and WTI, weekly since 2022, with a threshold ("mountain") view that fills green above and red below a breakeven you set. NW Europe needs ICE gasoil — see below. |
 | Retail diesel and petrol | Pump prices per litre for all 27 EU members plus the USA, Sweden emphasised. Toggles for fuel, tax treatment, and EUR/USD/SEK. |
+| US regional spread | Nine states for petrol and five PADD regions for diesel, against the bold national average. California against Texas is roughly a 50% difference on the same fuel, and most of it is tax. |
 | Rockets and feathers | Crude benchmarks against the US pump on a dual axis — retail chases a crude spike up in weeks and drifts back down over months. |
 
 ## Data sources
 
 | Source | Series | Licence |
 |---|---|---|
-| [EIA Open Data v2](https://www.eia.gov/opendata/) | NYH ULSD spot `EER_EPD2DXL0_PF4_Y35NY_DPG`, Brent `RBRTE`, WTI `RWTC`, US retail petrol `EMM_EPMR_PTE_NUS_DPG`, US retail diesel `EMD_EPD2D_PTE_NUS_DPG` | US Government work — public domain. A free API key is required. |
+| [EIA Open Data v2](https://www.eia.gov/opendata/) | NYH ULSD spot `EER_EPD2DXL0_PF4_Y35NY_DPG`, Brent `RBRTE`, WTI `RWTC`, US retail petrol `EMM_EPMR_PTE_NUS_DPG`, US retail diesel `EMD_EPD2D_PTE_NUS_DPG`, nine state petrol series `EMM_EPMR_PTE_S**_DPG`, five PADD diesel series `EMD_EPD2D_PTE_R**_DPG` | US Government work — public domain. A free API key is required. |
 | [EU Weekly Oil Bulletin](https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en) | Euro-super 95 and gas oil automobile, with and without taxes, all member states | European Commission open data, CC BY 4.0. Attribution required. |
 | [ECB SDMX](https://data.ecb.europa.eu/) | `EXR.D.USD.EUR.SP00.A`, `EXR.D.SEK.EUR.SP00.A` | ECB open data. Attribution required. |
 | ICE Low Sulphur Gasoil | Futures settlement | **Not redistributable.** See below. |

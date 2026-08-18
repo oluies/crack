@@ -179,3 +179,52 @@ COPY (
        'SEK': list(per_eur ORDER BY week_start) FILTER (WHERE ccy = 'SEK')
      } FROM (SELECT week_start, ccy, round(per_eur, 4) AS per_eur FROM stg.fx_weekly)) AS rates
 ) TO 'site/public/data/fx.json' (FORMAT json, ARRAY false);
+
+-- ---------------------------------------------------------------------------
+-- usregions.json — spridningen inom USA.
+--
+-- Egen fil, inte extra serier i retail.json: retail-diagrammet filtrerar på
+-- (fuel, tax) och skulle rita in delstaterna i EU-jämförelsen. En fil per
+-- diagram, som kontraktet säger.
+--
+-- USD/L som allt annat retail; frontend växlar. 'geo' bärs med så att
+-- diagrammet kan säga att diesel är PADD-regioner och inte delstater.
+-- ---------------------------------------------------------------------------
+COPY (
+  WITH defs AS (
+    SELECT DISTINCT fuel, code, label, geo FROM stg.region_weekly
+  ),
+  aligned AS (
+    SELECT d.*, c.week_start, p.usd_per_gal
+    FROM defs d
+    CROSS JOIN stg.week_calendar c
+    LEFT JOIN stg.region_weekly p
+      ON p.fuel = d.fuel AND p.code = d.code AND p.week_start = c.week_start
+  ),
+  regions AS (
+    SELECT any_value(fuel) AS fuel, any_value(code) AS code, {
+      'code':     any_value(code),
+      'label':    any_value(label),
+      'geo':      any_value(geo),
+      'fuel':     any_value(fuel),
+      'currency': 'USD',
+      'values':   list(round(usd_per_gal / 3.785411784, 4) ORDER BY week_start)
+    } AS s
+    FROM aligned GROUP BY fuel, code
+  )
+  SELECT
+    {
+      'generated': getvariable('generated'),
+      'sources': [
+        {'name':    'EIA Open Data v2',
+         'url':     'https://www.eia.gov/opendata/',
+         'licence': 'US Government work, public domain',
+         'series':  ['EMM_EPMR_PTE_S**_DPG (9 states)', 'EMD_EPD2D_PTE_R**_DPG (5 PADDs)']}
+      ],
+      'note': 'Petrol is published for nine states — EIA''s entire free state-level coverage, '
+              'not a selection. Diesel is published by PADD region, plus California. '
+              'The national average is volume-weighted and need not lie midway between the lines.'
+    } AS meta,
+    (SELECT list(week_start ORDER BY week_start) FROM stg.week_calendar) AS weeks,
+    (SELECT list(s ORDER BY fuel, code) FROM regions)                    AS regions
+) TO 'site/public/data/usregions.json' (FORMAT json, ARRAY false);

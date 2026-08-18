@@ -22,11 +22,18 @@ a key in cleartext on disk is a key that eventually lands in a commit or a backu
 The first Keychain read may raise a macOS permission prompt — "Always Allow" makes
 it silent thereafter.
 
-It must be the **login keychain**, via the command above. Saving the key in the
-macOS Passwords app instead puts it in the iCloud-backed store, which `security(1)`
-cannot read — `security list-keychains` shows only `login.keychain-db` and
-`System.keychain` — so the pipeline will report the key as missing however plainly
-it appears in Passwords.
+It must be the **login keychain**, via the command above. The macOS Passwords app
+stores items in the *data-protection* keychain, which `security(1)` cannot read —
+it reaches only the file-based keychains listed by `security list-keychains`. This
+has nothing to do with iCloud sync: the item is unreachable from a shell script
+whether or not iCloud Keychain is on, so the pipeline reports the key as missing
+however plainly Passwords shows it.
+
+The lookup is `security find-generic-password -a "$USER" -s EIA_API_KEY`, account
+included. Matching on the service alone would return whichever item comes first in
+the keychain search order — a second account's, one synced from another Mac — and
+the symptom would be a 403 from EIA against a key that looks right in Keychain
+Access.
 
 ## Run the pipeline
 

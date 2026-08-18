@@ -375,6 +375,45 @@ real_fetch_case "fetch_ecb: 404 is permanent"         fetch_ecb         "404" 1
 real_fetch_case "fetch_ecb: 503 retried then gives up" fetch_ecb        "503" 4
 real_fetch_case "fetch_oilbulletin: rotated UUID (404)" fetch_oilbulletin "404" 1
 
+# --- key resolution ----------------------------------------------------------
+#
+# En företrädesordning som bara står i README är en regel som kan kastas om utan
+# att något blir rött. CI kör dessutom på ubuntu, där security(1) inte finns, så
+# nyckelringsgrenen är död där om den inte drivs av en stubbe.
+
+key_case() {  # $1 = namn, $2 = env, $3 = keychain ("-" = ingen security), $4 = .env, $5 = väntat
+  local name="$1" env_key="$2" kc="$3" file_key="$4" want="$5"
+  local d="$TMP/keystub"; rm -rf "$d"; mkdir -p "$d"
+  if [ "$kc" != "-" ]; then
+    if [ -n "$kc" ]; then printf '#!/bin/sh\nprintf %s "%s"\n' '%s' "$kc" > "$d/security"
+    else printf '#!/bin/sh\nexit 44\n' > "$d/security"; fi
+    chmod +x "$d/security"
+  fi
+
+  local got
+  got=$(
+    # PATH utan systemets /usr/bin när vi vill simulera att security saknas.
+    if [ "$kc" = "-" ]; then PATH="$d"; else PATH="$d:$PATH"; fi
+    export PATH
+    . pipeline/lib/key.sh
+    resolve_eia_key "$env_key" "$file_key"
+  )
+
+  if [ "$got" = "$want" ]; then
+    printf 'ok    %-44s -> %s\n' "$name" "${got:-(tom)}"; pass=$((pass+1))
+  else
+    printf 'FAIL  %-44s -> %s, väntade %s\n' "$name" "${got:-(tom)}" "${want:-(tom)}"; fail=$((fail+1))
+  fi
+}
+
+#         namn                                      env      keychain  .env     väntat
+key_case "environment wins over everything"        ENVKEY   KCKEY     FILEKEY  ENVKEY
+key_case "keychain beats .env"                     ""       KCKEY     FILEKEY  KCKEY
+key_case "keychain miss falls through to .env"     ""       ""        FILEKEY  FILEKEY
+key_case "no security(1) at all falls to .env"     ""       "-"       FILEKEY  FILEKEY
+key_case "nothing anywhere yields empty"           ""       ""        ""       ""
+key_case "keychain alone"                          ""       KCKEY     ""       KCKEY
+
 # --- the happy path must still be green --------------------------------------
 
 reset_copy

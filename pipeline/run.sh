@@ -17,16 +17,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."          # repo root; the SQL writes to relative paths
 ROOT="$PWD"
 . pipeline/sources.env
-# Nyckeln i fallande ordning: miljön, macOS-nyckelringen, .env.
-#
-# Nyckelringen först av de två lagrade: en nyckel i klartext på disk är en
-# nyckel som förr eller senare hamnar i en commit, en backup eller en
-# molnsynkad katalog. .env finns kvar för Linux och CI-lika körningar.
+# .env läses ALLTID, inte bara när nyckeln saknas: filen är ett vanligt skalskript
+# och sätter ofta annat än nyckeln — ett lokalt OB_UUID medan man jagar ett
+# roterat bulletin-UUID, ett START_WEEK, en proxyvariabel. Att hoppa över den så
+# fort en nyckel dyker upp i miljön skulle tyst släcka de övriga inställningarna
+# och se ut som ett dataproblem i stället för ett konfigurationsproblem.
+ENV_KEY="${EIA_API_KEY:-}"          # miljön, innan .env kan skriva över
 # shellcheck source=/dev/null
-if [ -z "${EIA_API_KEY:-}" ] && command -v security >/dev/null 2>&1; then
-  EIA_API_KEY=$(security find-generic-password -s EIA_API_KEY -w 2>/dev/null) || EIA_API_KEY=""
-fi
-if [ -z "${EIA_API_KEY:-}" ] && [ -f .env ]; then . ./.env; fi
+if [ -f .env ]; then . ./.env; fi
+FILE_KEY="${EIA_API_KEY:-}"
+EIA_API_KEY=""                      # sätts först i live-grenen nedan
+
+# shellcheck source=lib/key.sh
+. pipeline/lib/key.sh
 
 WORK="$ROOT/data/work"
 DB="$ROOT/data/work/crack.duckdb"
@@ -62,10 +65,19 @@ pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
 
 case "$MODE" in
   live)
+    # Uppslaget ligger inne i live-grenen: --fixtures, --offline och --verify-only
+    # använder ingen nyckel, och den första nyckelringsläsningen kan resa en
+    # macOS-dialog utan timeout. Ett fixtures-bygge från launchd eller ett
+    # icke-interaktivt skal ska inte kunna blockera på en fråga om ett värde det
+    # aldrig läser.
+    EIA_API_KEY=$(resolve_eia_key "$ENV_KEY" "$FILE_KEY")
     [ -n "${EIA_API_KEY:-}" ] || die "EIA_API_KEY saknas. Hämta en gratis nyckel på
      https://www.eia.gov/opendata/register.php och lägg den i macOS-nyckelringen:
        security add-generic-password -a \"\$USER\" -s EIA_API_KEY -w
-     eller exportera den i miljön, eller lägg den i .env (gitignorerad).
+     OBS: Passwords-appen räcker inte. Den lagrar i data protection-nyckelringen,
+     som security(1) inte kan läsa — nyckeln kan alltså synas tydligt i Passwords
+     och ändå rapporteras som saknad här.
+     Alternativt: exportera den i miljön, eller lägg den i .env (gitignorerad).
      Utan nyckel: pipeline/run.sh --fixtures bygger på syntetisk EIA-data."
     fetch_eia "$EIA_SPOT_URL"   eia_spot   daily  $EIA_SPOT_SERIES
     fetch_eia "$EIA_RETAIL_URL" eia_retail weekly $EIA_RETAIL_SERIES

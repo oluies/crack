@@ -85,8 +85,9 @@ Other conventions:
 
 ```bash
 # macOS: keep the key in the login keychain rather than a file on disk.
-# NOT the Passwords app — it writes to the iCloud-backed store, which the
-# security(1) CLI cannot read, so a shell script will not find it there.
+# NOT the Passwords app — it stores items in the data-protection keychain,
+# which security(1) cannot read at all (iCloud on or off), so a shell script
+# will not find it there however plainly Passwords shows it.
 security add-generic-password -a "$USER" -s EIA_API_KEY -w
 # or, anywhere: export EIA_API_KEY=... / put it in .env (gitignored)
 

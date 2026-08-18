@@ -13,8 +13,17 @@ substitutes these so CI can exercise the real SQL — the envelope shape, the
 The Oil Bulletin and ECB are keyless and are fetched live even in fixtures mode,
 so a reissued Oil Bulletin UUID fails in CI rather than in the weekly job.
 
-**Never publish a fixtures build.** `run.sh --fixtures` says so loudly, and
-`ci.yml` restores the committed JSON afterwards.
+**Never publish a fixtures build.** This has happened once: `--fixtures` was run
+locally to test something, then `git add -A` committed the synthetic output and
+sine waves went live. Saying so loudly was not enough, so there are now two
+mechanical guards:
+
+1. `run.sh --fixtures` restores `site/public/data` from git when it finishes, so
+   a fixtures run leaves the working tree as it found it.
+2. Every export records `meta.synthetic`, and CI fails if committed data carries
+   `"synthetic": true`.
+
+The first prevents it; the second catches it if the first is bypassed.
 
 To regenerate, see the `duckdb -c` invocation recorded in the commit that added
 this directory.

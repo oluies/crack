@@ -66,6 +66,21 @@ jobs:
           ./mill site.bundleFast
           cd site/test && npm install --no-audit --no-fund && node smoke.mjs
 
+      # Second layer, and the one that would have caught the real incident: a
+      # fixtures build stamps meta.synthetic=true, so committed data carrying it
+      # means sine waves reached the repository. run.sh now restores the tree
+      # after --fixtures, but that only helps if someone runs run.sh.
+      - name: Committed data must not be synthetic
+        if: always()
+        run: |
+          git checkout -- site/public/data 2>/dev/null || true
+          if grep -l '"synthetic":true' site/public/data/*.json 2>/dev/null; then
+            echo "FEL: committad data är syntetisk (fixtures-bygge). Kör pipeline/run.sh"
+            echo "     med en riktig EIA_API_KEY och committa om."
+            exit 1
+          fi
+          echo "committad data är riktig"
+
       # The fixture build writes synthetic crack data into site/public/data.
       # git checkout alone is not enough — it is a no-op for files that are not
       # tracked yet — so clean untracked output too.

@@ -183,5 +183,19 @@ for f in "$OUT_DIR"/*.json; do
   fi
 done
 
+# Ett fixtures-bygge får inte lämna syntetisk data i arbetskopian. Kontrollen i
+# ci.yml skyddade bara CI; en lokal körning följd av "git add -A" publicerade
+# sinuskurvor till produktion. Återställ spårade filer här, där båda vägarna
+# passerar, i stället för i ett arbetsflöde bara den ena kör.
+if [ "$MODE" = "fixtures" ]; then
+  if git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "$ROOT" checkout -- site/public/data 2>/dev/null || true
+    git -C "$ROOT" clean -fdq site/public/data 2>/dev/null || true
+    say "syntetisk utdata återställd — arbetskopian rörd orörd"
+  else
+    say "VARNING: inget git-repo; syntetisk utdata ligger kvar i $OUT_DIR"
+  fi
+fi
+
 say "klart:"
 ls -l "$OUT_DIR"/*.json >&2

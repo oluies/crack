@@ -13,10 +13,14 @@ change unilaterally.
   prices, 4 for FX. Rounding at export rather than in the browser keeps the files
   small and the displayed value identical for everyone.
 - **`meta` is per file** and satisfies FR-018 and constitution III.
+- **`meta.synthetic`** is true only for a `--fixtures` build. Published data must
+  always carry `false`; CI fails otherwise. It exists because a fixtures build was
+  once committed and served real-looking sine waves to the site.
 
 ```json
 "meta": {
   "generated": "2026-08-17",
+  "synthetic": false,
   "sources": [
     { "name": "EIA Open Data v2",
       "url": "https://www.eia.gov/opendata/",

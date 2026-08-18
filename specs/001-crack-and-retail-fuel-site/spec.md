@@ -250,8 +250,10 @@ in its own unit, and the axes align at a common baseline rather than floating.
 - **FR-017**: Currency conversion MUST use the ECB reference rate for the same week
   as each observation, not a single spot rate applied to the whole series.
 - **FR-018**: Each chart MUST state its sources and the data's refresh date.
-- **FR-019**: The site MUST function as static files served from any path, with no
-  request at page load to any origin other than the ECharts CDN.
+- **FR-019**: The site MUST function as static files served from any path. The only
+  permitted third-party origins at page load are the ECharts CDN and a cookieless
+  analytics beacon. Neither may be load-bearing: with both blocked, every chart
+  must still render from the local JSON.
 - **FR-023**: The crack chart MUST offer a threshold ("mountain") view filling the
   area between the spread and a visitor-set threshold, green above and red below,
   with the threshold drawn as a labelled dashed reference line.

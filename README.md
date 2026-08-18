@@ -141,6 +141,21 @@ lift the current one from the
 The pipeline checks that what it downloaded is actually a spreadsheet, so a
 reissued UUID fails with that message rather than as a parse error.
 
+## Analytics
+
+The site counts page views with [GoatCounter](https://www.goatcounter.com/)
+(`oluies.goatcounter.com`). No cookies, no cross-site tracking, no personal data —
+which is why there is no consent banner: there is nothing to consent to under
+GDPR. The counter script skips `localhost`, so development does not pollute the
+figures.
+
+It is loaded `async` and is strictly optional. Block it, and the site behaves
+identically; the smoke test never executes it, so every run proves the page works
+without it. The ECharts CDN is the opposite — it is the charting library, so if it
+fails there are no charts. Both are permitted third-party origins under
+[the constitution](.specify/memory/constitution.md), which spells out that
+distinction rather than lumping them together.
+
 ## Licence
 
 Code © 2026 Örjan Lundberg, MIT. Data belongs to the sources above under their own

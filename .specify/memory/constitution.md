@@ -17,6 +17,20 @@ immune to an upstream API outage taking the charts down.
 Consequence: any feature that would require a request at page-load time is out of
 scope until the constitution is amended.
 
+Amended 2026-08-18: two third-party origins are permitted, and only these two —
+the ECharts CDN, and a cookieless analytics beacon (GoatCounter). Neither carries
+data outward beyond the URL being viewed.
+
+They are not equivalent, and the distinction is the rule. The beacon is strictly
+optional: blocked, failed or refused, the page is unaffected, and that is the
+condition of admitting it. The ECharts CDN is load-bearing by construction — it
+is the charting library, so if it fails there are no charts. That is a real
+dependency this project accepts in exchange for shipping no bundler, and it is
+the reason the bar for a third origin is high rather than a formality.
+
+Any further external origin requires another amendment, and one that is
+load-bearing requires justifying why it may fail the whole page.
+
 ### II. SQL Is the Pipeline
 
 Data acquisition, reshaping, and aggregation live in DuckDB SQL under `pipeline/`.
@@ -93,4 +107,4 @@ Amendments record what changed and why. Complexity that is not demanded by a
 principle above must be justified in the plan's Complexity Tracking section or
 removed.
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-17
+**Version**: 1.1.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-18

@@ -17,8 +17,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."          # repo root; the SQL writes to relative paths
 ROOT="$PWD"
 . pipeline/sources.env
+# Nyckeln i fallande ordning: miljön, macOS-nyckelringen, .env.
+#
+# Nyckelringen först av de två lagrade: en nyckel i klartext på disk är en
+# nyckel som förr eller senare hamnar i en commit, en backup eller en
+# molnsynkad katalog. .env finns kvar för Linux och CI-lika körningar.
 # shellcheck source=/dev/null
-if [ -f .env ]; then . ./.env; fi   # gitignored; convenient place for EIA_API_KEY
+if [ -z "${EIA_API_KEY:-}" ] && command -v security >/dev/null 2>&1; then
+  EIA_API_KEY=$(security find-generic-password -s EIA_API_KEY -w 2>/dev/null) || EIA_API_KEY=""
+fi
+if [ -z "${EIA_API_KEY:-}" ] && [ -f .env ]; then . ./.env; fi
 
 WORK="$ROOT/data/work"
 DB="$ROOT/data/work/crack.duckdb"
@@ -55,8 +63,10 @@ pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
 case "$MODE" in
   live)
     [ -n "${EIA_API_KEY:-}" ] || die "EIA_API_KEY saknas. Hämta en gratis nyckel på
-     https://www.eia.gov/opendata/register.php och exportera den, eller kör
-     pipeline/run.sh --fixtures för att bygga utan nyckel."
+     https://www.eia.gov/opendata/register.php och lägg den i macOS-nyckelringen:
+       security add-generic-password -a \"\$USER\" -s EIA_API_KEY -w
+     eller exportera den i miljön, eller lägg den i .env (gitignorerad).
+     Utan nyckel: pipeline/run.sh --fixtures bygger på syntetisk EIA-data."
     fetch_eia "$EIA_SPOT_URL"   eia_spot   daily  $EIA_SPOT_SERIES
     fetch_eia "$EIA_RETAIL_URL" eia_retail weekly $EIA_RETAIL_SERIES
     fetch_ecb

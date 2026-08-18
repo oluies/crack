@@ -84,11 +84,19 @@ Other conventions:
 ## Running it
 
 ```bash
-export EIA_API_KEY=...        # free: https://www.eia.gov/opendata/register.php
+# macOS: keep the key in the Keychain rather than a file on disk
+security add-generic-password -a "$USER" -s EIA_API_KEY -w
+# or, anywhere: export EIA_API_KEY=... / put it in .env (gitignored)
+
 pipeline/run.sh               # fetch, build, verify, export to site/public/data/
 mill site.fullLinkJS          # or site.bundleFull to link straight into site/public/
 cd site && python3 -m http.server 8000
 ```
+
+A free key comes from <https://www.eia.gov/opendata/register.php>. `run.sh` looks
+for it in the environment, then the macOS Keychain, then `.env` — the Keychain
+first of the two stored forms, because a key in cleartext on disk is a key that
+eventually lands in a commit, a backup or a synced folder.
 
 Needs DuckDB 1.5+, Mill 1.1+, JDK 21 and curl. More detail, including the
 `--offline` / `--fixtures` / `--verify-only` modes, in

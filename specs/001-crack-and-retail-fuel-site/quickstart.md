@@ -12,8 +12,15 @@
 An EIA API key, free from <https://www.eia.gov/opendata/register.php>.
 
 ```bash
-export EIA_API_KEY=...        # or put it in .env, which is gitignored
+security add-generic-password -a "$USER" -s EIA_API_KEY -w   # macOS Keychain
+export EIA_API_KEY=...                                       # or the environment
+echo 'EIA_API_KEY=...' > .env                                # or .env (gitignored)
 ```
+
+`run.sh` checks those three in that order. The Keychain is preferred over `.env`:
+a key in cleartext on disk is a key that eventually lands in a commit or a backup.
+The first Keychain read may raise a macOS permission prompt — "Always Allow" makes
+it silent thereafter.
 
 ## Run the pipeline
 

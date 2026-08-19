@@ -26,6 +26,26 @@
 -- en egenskap hos format() — flyttas ett filter måste de coalesce:as.
 -- ---------------------------------------------------------------------------
 
+-- 1a. Databasens schema är från den här versionen av pipelinen.
+--
+--     Först av allt, och medvetet via information_schema i stället för genom att
+--     läsa kolumnerna: en databas byggd före built_on (eller före min_week_obs)
+--     får annars check 1d att inte ens BINDA, och DuckDB svarar
+--     "Binder Error: Referenced column built_on not found" — ett fel som pekar
+--     på en kolumn i stället för på orsaken, flera steg från den. 1d kan inte
+--     fånga det, eftersom 1d är en av satserna som slutar binda.
+--
+--     --verify-only är precis kommandot man riktar mot en äldre databas, så det
+--     här är inte ett teoretiskt läge. Samma resonemang som export-check 8, som
+--     sonderar rå JSON först av just det skälet.
+SELECT CASE WHEN (SELECT count(*) FROM information_schema.columns
+                  WHERE table_schema = 'stg' AND table_name = 'build_meta'
+                    AND column_name IN ('min_week_obs', 'built_on')) <> 2
+  THEN error('verify 1a: this database predates min_week_obs/built_on in stg.build_meta '
+             '- it was built by an older pipeline. Rebuild it: pipeline/run.sh '
+             '(--verify-only cannot upgrade an existing database)')
+END AS "1a database schema is current";
+
 -- 1b. Veckoaxeln finns över huvud taget.
 --
 --     Först, för att allt nedanför vilar på den. En tom stg.week_calendar gör
@@ -198,7 +218,8 @@ FROM (
 --    call it data. Two weeks of slack absorbs normal publication lag.
 --
 --    Check 7 (crack) is gated on strict: under --fixtures the EIA half is a
---    frozen synthetic snapshot while week_calendar tracks current_date, so it
+--    frozen synthetic snapshot while week_calendar follows the build date
+--    (stg.build_meta.built_on), which advances with every run, so it
 --    would start failing every CI run weeks after the fixtures were generated.
 --    Check 7b (EU retail) is NOT gated — the Oil Bulletin is fetched live in
 --    every mode, so a workbook that still parses but has stopped being updated

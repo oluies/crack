@@ -134,7 +134,8 @@ Each assertion fails the run with a message naming what broke.
 6. `fx_weekly` covers every calendar week for both currencies.
 7. No long trailing run of empty weeks — data has not gone stale upstream.
    Check 7 (crack) is **live runs only**: under `--fixtures` the EIA half is a
-   frozen synthetic snapshot while `week_calendar` tracks `current_date`, so it
+   frozen synthetic snapshot while `week_calendar` follows the build date
+   (`stg.build_meta.built_on`), which advances with every run, so it
    would start failing every CI run weeks after the fixtures were generated,
    blocking pull requests for an unrelated reason.
    Check 7b (EU retail) is **not** gated — the Oil Bulletin is fetched live in

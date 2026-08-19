@@ -145,6 +145,15 @@ echo "negativa prov — varje invariant måste kunna fälla:"
 expect_fail "week calendar emptied entirely" "verify 1b" \
   "DELETE FROM stg.week_calendar;" verify
 
+# En databas byggd av en äldre pipeline. Utan check 1a blir svaret ett
+# binder-fel som namnger en kolumn i stället för orsaken — och --verify-only är
+# just kommandot man riktar mot en gammal databas.
+expect_fail "database predates built_on" "verify 1a" \
+  "ALTER TABLE stg.build_meta DROP COLUMN built_on;" verify
+
+expect_fail "database predates min_week_obs" "verify 1a" \
+  "ALTER TABLE stg.build_meta DROP COLUMN min_week_obs;" verify
+
 expect_fail "build_meta emptied (min_week_obs unreadable)" "verify 1d" \
   "DELETE FROM stg.build_meta;" verify
 

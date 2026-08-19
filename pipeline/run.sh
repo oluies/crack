@@ -121,7 +121,8 @@ esac
 
 OB_PATH="$WORK/$OB_FILE"
 
-# Fixtures är en fryst ögonblicksbild medan week_calendar följer current_date.
+# Fixtures är en fryst ögonblicksbild medan week_calendar följer byggdagen
+# (stg.build_meta.built_on), som flyttar sig vid varje körning.
 # Färskhetskontrollerna i verify.sql skulle därför börja fälla varje CI-körning
 # några veckor efter att fixtures genererades — och blockera varje pull request
 # med ett fel som inte har med ändringen att göra.

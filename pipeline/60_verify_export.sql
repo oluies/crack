@@ -17,6 +17,11 @@
 --
 -- Contract: specs/001-crack-and-retail-fuel-site/contracts/chart-json.md
 
+-- VARNING, gäller varje kontroll här och i verify.sql: format() ger NULL om
+--     något argument är NULL, och error(NULL) kastar inte — den returnerar NULL
+--     och körningen fortsätter grön. Interpolerade uttryck coalesce:as därför
+--     till text, annars är kontrollen tyst i precis det värsta fallet.
+
 -- 8. Shape first, on the raw JSON.
 --
 --    Every check below reads the files through read_json, whose inferred schema
@@ -96,7 +101,8 @@ FROM (
 --    NULL, and NULL <> w is NULL, which would quietly not match.
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 9: {} series in cracks.json are misaligned (weeks={}): {}',
-                    count(*), any_value(w), string_agg(key || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
+                    count(*), coalesce(any_value(w)::VARCHAR, 'NULL'),
+                    string_agg(coalesce(key, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
 END AS "9 cracks.json series aligned"
 FROM (
   SELECT s.key AS key, len(s.values) AS n, len(weeks) AS w
@@ -118,7 +124,7 @@ SELECT CASE WHEN (SELECT count(*) FROM bad) > 0
   THEN error(format('verify 10: {} of {} series in retail.json are misaligned (weeks={}); first: {}',
                     (SELECT count(*) FROM bad),
                     (SELECT count(*) FROM allser),
-                    (SELECT any_value(w) FROM bad),
+                    coalesce((SELECT any_value(w) FROM bad)::VARCHAR, 'NULL'),
                     (SELECT string_agg(coalesce(label, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')
                      FROM (SELECT * FROM bad LIMIT 5))))
 END AS "10 retail.json series aligned"
@@ -144,7 +150,8 @@ WHERE rates.USD IS NULL
 -- 11b. usregions.json aligned to the same axis.
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 11b: {} US region series are misaligned (weeks={}): {}',
-                    count(*), any_value(w), string_agg(code || '/' || fuel || '=' || coalesce(n::VARCHAR,'NULL'), ', ')))
+                    count(*), coalesce(any_value(w)::VARCHAR, 'NULL'),
+                    string_agg(coalesce(code, '?') || '/' || coalesce(fuel, '?') || '=' || coalesce(n::VARCHAR,'NULL'), ', ')))
 END AS "11b usregions.json aligned"
 FROM (
   SELECT s.code AS code, s.fuel AS fuel, len(s.values) AS n, len(weeks) AS w
@@ -175,7 +182,8 @@ END AS "12 shared week axis";
 --     ge en linjal — men bara den serien, inte alla ma7.
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 17: {} series in cracks_daily.json are misaligned (days={}): {}',
-                    count(*), any_value(w), string_agg(key || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
+                    count(*), coalesce(any_value(w)::VARCHAR, 'NULL'),
+                    string_agg(coalesce(key, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
 END AS "17 cracks_daily.json series aligned"
 FROM (
   SELECT s.key AS key, len(s.values) AS n, len(days) AS w
@@ -197,7 +205,7 @@ END AS "18a daily axis present";
 
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 18: the daily axis is not strictly ascending ({} bad step(s), first at index {})',
-                    count(*), min(i)))
+                    count(*), coalesce(min(i)::VARCHAR, 'none')))
 END AS "18 daily axis strictly ascending"
 FROM (
   SELECT i, d

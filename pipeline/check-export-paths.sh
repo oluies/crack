@@ -29,7 +29,10 @@ REL="${OUT_DIR#"$ROOT"/}"
 # Målen läses UR filen i stället för ur en lista här. En hårdkodad lista är
 # tyst för precis det fel som är lättast att göra — en ny COPY som skriver
 # någon annanstans — och den listan har redan hunnit bli inaktuell en gång.
-TARGETS=$(grep -oE "TO '[^']*\.json'" "$EXPORT_SQL" | sed "s/^TO '//; s/'$//")
+# || true är inte kosmetik: under set -e fäller grep:s exitkod 1 (inga träffar)
+# hela skriptet på tilldelningsraden, och diagnosen nedan blir oåtkomlig. Felet
+# hade då rapporterats som tom utdata i stället för som ett meddelande.
+TARGETS=$(grep -oE "TO '[^']*\.json'" "$EXPORT_SQL" | sed "s/^TO '//; s/'$//" || true)
 
 [ -n "$TARGETS" ] || {
   echo "FEL: hittade inga COPY ... TO '...json'-mål i $EXPORT_SQL" >&2

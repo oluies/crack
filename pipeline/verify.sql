@@ -112,6 +112,14 @@ FROM (
   WHERE f.per_eur IS NULL
 );
 
+-- VARNING, gäller varje kontroll i den här filen: format() ger NULL om NÅGOT
+--     argument är NULL, och error(NULL) KASTAR INTE — den returnerar NULL och
+--     körningen fortsätter grön. Ett meddelande som interpolerar ett värde som
+--     kan vara NULL gör alltså kontrollen tyst i precis det värsta fallet: en
+--     tom tabell. Därför är varje interpolerat uttryck nedan coalesce:at till
+--     text. Upptäckt när check 14 vägrade fälla på en serie utan observationer,
+--     där expected var NULL.
+
 -- 7. No long trailing run of empty weeks. The calendar ends at the last complete
 --    week, but if a source has stalled we would publish a flat blank tail and
 --    call it data. Two weeks of slack absorbs normal publication lag.
@@ -133,16 +141,17 @@ SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT
                  - coalesce((SELECT max(week_start) FROM stg.crack_weekly
                              WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 21
   THEN error(format('verify 7: crack data stale - calendar ends {}, last observation {}',
-                    (SELECT max(week_start) FROM stg.week_calendar),
-                    (SELECT max(week_start) FROM stg.crack_weekly WHERE usd_per_bbl IS NOT NULL)))
+                    coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                    coalesce((SELECT max(week_start) FROM stg.crack_weekly
+                              WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
 END AS "7 crack data fresh"
 ;
 
 SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly), DATE '1900-01-01') > 14
   THEN error(format('verify 7b: EU retail data stale - calendar ends {}, last observation {}',
-                    (SELECT max(week_start) FROM stg.week_calendar),
-                    (SELECT max(week_start) FROM stg.retail_eu_weekly)))
+                    coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                    coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly)::VARCHAR, 'none')))
 END AS "7b EU retail data fresh"
 ;
 
@@ -178,9 +187,9 @@ SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 13: {} published weekly leg(s) rest on fewer than {} daily '
                     'observations (first: {} {}, {} obs) - a partial week must publish as NULL',
                     count(*), getvariable('min_week_obs'),
-                    min(week_start),
-                    (SELECT series_id FROM thin ORDER BY week_start, series_id LIMIT 1),
-                    (SELECT n FROM thin ORDER BY week_start, series_id LIMIT 1)))
+                    coalesce(min(week_start)::VARCHAR, 'none'),
+                    coalesce((SELECT series_id FROM thin ORDER BY week_start, series_id LIMIT 1), 'none'),
+                    coalesce((SELECT n FROM thin ORDER BY week_start, series_id LIMIT 1)::VARCHAR, 'none')))
 END AS "13 weekly legs have enough daily coverage"
 FROM thin;
 
@@ -215,11 +224,14 @@ SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 14: {} of {} MA7 point(s) do not equal the trailing 7-day mean '
                     '(first: {} {}, published {}, expected {}, {} obs in window)',
                     count(*), (SELECT count(*) FROM recomputed),
-                    (SELECT obs_date    FROM bad ORDER BY obs_date, series_key LIMIT 1),
-                    (SELECT series_key  FROM bad ORDER BY obs_date, series_key LIMIT 1),
-                    (SELECT round(published, 4) FROM bad ORDER BY obs_date, series_key LIMIT 1),
-                    (SELECT round(expected, 4)  FROM bad ORDER BY obs_date, series_key LIMIT 1),
-                    (SELECT n FROM bad ORDER BY obs_date, series_key LIMIT 1)))
+                    coalesce((SELECT obs_date   FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'none'),
+                    coalesce((SELECT series_key FROM bad ORDER BY obs_date, series_key LIMIT 1), 'none'),
+                    -- published och expected är NULL i just de fall kontrollen
+                    -- finns för: en punkt som inte borde finnas, och en serie
+                    -- utan observationer i fönstret.
+                    coalesce((SELECT round(published, 4) FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'null'),
+                    coalesce((SELECT round(expected, 4)  FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'null'),
+                    coalesce((SELECT n FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'none')))
 END AS "14 MA7 equals the trailing 7-day mean"
 FROM bad;
 
@@ -252,8 +264,9 @@ SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
                                               WHERE usd_per_bbl IS NOT NULL),
                                              DATE '1900-01-01') > 20
   THEN error(format('verify 16: daily crack data stale - today {}, last observation {}',
-                    current_date,
-                    (SELECT max(obs_date) FROM stg.crack_daily WHERE usd_per_bbl IS NOT NULL)))
+                    current_date::VARCHAR,
+                    coalesce((SELECT max(obs_date) FROM stg.crack_daily
+                              WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
 END AS "16 daily crack data fresh"
 ;
 

@@ -188,6 +188,19 @@ expect_pass "crack staleness silent on a fixtures build" \
   "UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.crack_weekly WHERE week_start > DATE '2026-01-01';" verify
 
+# format() ger NULL om något argument är NULL, och error(NULL) kastar inte. En
+# HELT tom crack_weekly gör max(week_start) NULL, och före härdningen rapporterade
+# check 7 då grönt på den värsta tänkbara datan. Provet ovan tömmer bara delvis
+# och kunde därför inte se det.
+expect_fail "crack_weekly emptied entirely (error(NULL))" "verify 7" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.crack_weekly;" verify
+
+# 7b:s NULL-gren har medvetet inget prov: den enda datan som gör
+# max(week_start) NULL är en tom retail_eu_weekly, och då fäller check 3 först
+# och med rätta. Härdningen av 7b står kvar ändå — den kostar ingenting och
+# check 3 kan komma att flyttas.
+
 # --- täckning, linjal och dagsaxel -------------------------------------------
 #
 # Check 13 räknar om täckningen ur stg.spot_daily i stället för ur den GROUP BY
@@ -315,9 +328,14 @@ cmp -s pipeline/50_export.sql "$TMP/export_moved.sql" \
   && die "sed-mönstret matchade inte längre — COPY-målet i 50_export.sql har bytt form"
 
 guard "export paths as shipped"         pass "$SRC_JSON"         pipeline/50_export.sql
-guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "för: retail.json"
+guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "utanför"
 guard "out_dir moved, export unchanged" fail "$ROOT/nagon/annan" pipeline/50_export.sql       "nagon/annan/"
 guard "export sql does not exist"       fail "$SRC_JSON"         "$TMP/ingen_sadan_fil.sql"   "finns inte"
+
+# Målen läses numera UR filen. En fil utan COPY-mål får då inte passera tyst —
+# det vore en guard som godkänner allt, vilket är värre än ingen guard.
+printf -- "-- inga COPY-mål alls\n" > "$TMP/export_tom.sql"
+guard "export sql has no COPY targets" fail "$SRC_JSON"         "$TMP/export_tom.sql"        "inga COPY"
 
 # --- the fetch retry logic ---------------------------------------------------
 #

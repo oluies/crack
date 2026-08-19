@@ -13,9 +13,17 @@
 # Its own file rather than a few lines inside run.sh so negative.sh can prove it
 # both fires and stays green — an untested guard is how the inert checks got in.
 #
-# Exit codes: 0 = they agree (or there is nothing to compare), 1 = they disagree,
-# 2 = this script was called wrongly. run.sh dispatches on them, so 1 must mean
-# one thing only.
+# Exit codes: 0 = they agree, or the comparison could not be made; 1 = they
+# disagree; 2 = this script was called wrongly. run.sh dispatches on them, so 1
+# must mean one thing only.
+#
+# "Could not be made" deliberately shares 0 with "they agree", and that is not
+# laziness. Every way the comparison can fail already has a better diagnosis
+# downstream, and run.sh runs verify.sql BEFORE 60_verify_export.sql in the same
+# session: a database too old to read gets verify 1a, which names the missing
+# tables and says to rebuild, and an unstamped cracks.json gets export check 8,
+# which names the field. Reporting them here as well would be two diagnoses for
+# one fault, and the worse of the two would come first.
 #
 # Silent (exit 0) when either side is missing or unstamped: an absent cracks.json
 # is export check 8's business, and this guard reporting it would be a second

@@ -70,7 +70,12 @@ case "$SYNTHETIC" in
 esac
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# Lägesbiten på check-build-pairing.sh återställs HÄR och inte bara i provets
+# egen RETURN-trap: provets långsamma steg är en full invariantkörning, och ett
+# avbrott där (Ctrl-C, en dödad CI-step) hoppar över RETURN. Trädet skulle då
+# ligga kvar med en icke körbar guard — provet som finns för att visa att
+# kontroller inte är tröga hade lämnat efter sig en som verkligen är det.
+trap 'rm -rf "$TMP"; chmod +x pipeline/check-build-pairing.sh 2>/dev/null || true' EXIT
 mkdir -p "$TMP/data"
 
 pass=0; fail=0
@@ -659,7 +664,8 @@ verify_only_case
 # tyst hoppat över export-invarianterna — en kontroll som försvinner när den går
 # sönder, vilket är oskiljbart från en som aldrig fungerade.
 #
-# Lägesbiten är spårad av git, så den återställs även om provet dör på vägen.
+# EXIT-trappen högst upp återställer lägesbiten även vid avbrott; RETURN-trappen
+# här gör det direkt. Att git spårar biten gör ändringen SYNLIG, inte återställd.
 broken_guard_case() {
   local name="--verify-only when the guard cannot run" out rc
   chmod -x pipeline/check-build-pairing.sh || {
@@ -681,6 +687,21 @@ broken_guard_case() {
   fi
 }
 broken_guard_case
+
+# Felaktigt anrop är 2, inte 1. Skulle det bli 1 läser run.sh det som "paret är i
+# otakt" och degraderar tyst i stället för att säga att anropet är fel — och
+# ${1:?} gav precis 1, vilket är varför raden finns.
+for args in "" "bara-ett"; do
+  # shellcheck disable=SC2086
+  pipeline/check-build-pairing.sh $args >/dev/null 2>&1
+  rc=$?
+  label="wrong arg count (${args:-inga argument})"
+  if [ "$rc" = 2 ]; then
+    printf 'ok    %-44s -> exit 2\n' "$label"; pass=$((pass+1))
+  else
+    printf 'FAIL  %-44s -> exit %s, väntade 2\n' "$label" "$rc"; fail=$((fail+1))
+  fi
+done
 
 # --- the fetch retry logic ---------------------------------------------------
 #

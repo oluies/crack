@@ -54,8 +54,20 @@ command -v duckdb  >/dev/null  || die "duckdb krävs"
 # Stämpeln i KOPIORNA riktas därför efter databasen innan något prov körs. Det
 # lagar en egenskap hos riggen, inte hos produktionen, där båda kommer ur samma
 # körning. Läses en gång: strict är konstant i SRC_DB.
-SYNTHETIC=$(duckdb "$SRC_DB" -noheader -list -c 'SELECT NOT strict FROM stg.build_meta') \
+# -readonly: filens egen utfästelse högst upp är att den riktiga databasen aldrig
+# rörs, och en skrivbar öppning tar exklusivt lås och kan checkpointa på plats.
+SYNTHETIC=$(duckdb -readonly "$SRC_DB" -noheader -list \
+              -c 'SELECT NOT strict FROM stg.build_meta') \
   || die "kunde inte läsa strict ur $SRC_DB"
+
+# duckdb skriver en tom rad och avslutar med 0 om build_meta är tom eller strict
+# är NULL, så || die ovan fångar det inte. Ett tomt SYNTHETIC hade stämplat false
+# överallt och fällt varje export-prov på 8b i stället för på sin egen kontroll —
+# alltså precis den vilseledande kaskad de här raderna finns för att stänga.
+case "$SYNTHETIC" in
+  true|false) ;;
+  *) die "oväntat strict-värde i $SRC_DB: '$SYNTHETIC' (bygg om med pipeline/run.sh)" ;;
+esac
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -68,11 +80,20 @@ pass=0; fail=0
 cat > "$TMP/stamp.py" <<'STAMP_PY'
 import json, sys, glob, os
 d, val = sys.argv[1], sys.argv[2].strip().lower() == 'true'
+stamped = 0
 for f in glob.glob(os.path.join(d, '*.json')):
     o = json.load(open(f))
-    if isinstance(o.get('meta'), dict):
-        o['meta']['synthetic'] = val
+    # Tyst hoppa över vore en no-op: byter exporten form på meta stämplas inget,
+    # och varje export-prov dör på 8b med en diagnos som pekar på korruptionen i
+    # stället för på riggen.
+    if not isinstance(o.get('meta'), dict):
+        sys.exit(f'{os.path.basename(f)}: meta är inte ett objekt — riggen kan '
+                 f'inte rikta stämpeln, och proven skulle rapportera fel kontroll')
+    o['meta']['synthetic'] = val
     json.dump(o, open(f, 'w'))
+    stamped += 1
+if stamped == 0:
+    sys.exit(f'inga JSON-filer att stämpla i {d}')
 STAMP_PY
 
 # Skrivs en gång, inte per prov: ett prov som råkar köra först ska inte avgöra

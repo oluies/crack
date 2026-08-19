@@ -146,6 +146,21 @@ SET VARIABLE out_dir    = '$OUT_DIR';
 SQL
 
 if [ "$MODE" = "verify" ]; then
+  # Efter --fixtures är databasen syntetisk medan site/public/data har
+  # återställts till den committade riktiga datan — run.sh gör det med flit. Att
+  # då verifiera de publicerade filerna mot den databasen är meningslöst, och
+  # utan den här raden är svaret ett verify 8b om fel stämpel, vilket pekar på
+  # datan i stället för på att paret inte hör ihop.
+  db_synth=$(duckdb -readonly "$DB" -noheader -list \
+               -c 'SELECT NOT strict FROM stg.build_meta' 2>/dev/null) || db_synth=""
+  file_synth=$(grep -o '"synthetic":[a-z]*' "$OUT_DIR/cracks.json" 2>/dev/null | head -1 | cut -d: -f2)
+  if [ -n "$db_synth" ] && [ -n "$file_synth" ] && [ "$db_synth" != "$file_synth" ]; then
+    die "databasen och de publicerade filerna kommer inte ur samma körning
+     (databasen: synthetic=$db_synth, $OUT_DIR/cracks.json: synthetic=$file_synth).
+     Det inträffar efter 'pipeline/run.sh --fixtures', som återställer
+     site/public/data ur git men lämnar den syntetiska databasen kvar.
+     Kör om bygget — pipeline/run.sh — innan du verifierar."
+  fi
   say "kör invarianter"
   duckdb "$DB" -f "$WORK/preamble.sql" \
     -f pipeline/verify.sql -f pipeline/60_verify_export.sql

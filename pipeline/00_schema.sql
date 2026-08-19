@@ -12,8 +12,14 @@
 -- read the sources, not to this one. start_week in particular is the week axis's
 -- lower bound, and the axis is built in 25_calendar.sql. Three attempts at a
 -- fuller map of which script reads which variable were each wrong in a new way;
--- the list above is what this file reads, and `grep getvariable pipeline/` is a
--- better answer than a prose summary that has to be maintained by hand.
+-- the list above is what this file reads, and a grep is a better answer than a
+-- prose summary maintained by hand. It needs both spellings:
+--
+--   grep -rE "getvariable|build_meta" pipeline/
+--
+-- strict and min_week_obs are read downstream OUT OF stg.build_meta, not through
+-- getvariable() — that is the whole point of recording them here — so grepping
+-- for getvariable alone finds only this file and makes them look unused.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

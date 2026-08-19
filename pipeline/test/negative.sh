@@ -145,6 +145,43 @@ echo "negativa prov — varje invariant måste kunna fälla:"
 expect_fail "week calendar emptied entirely" "verify 1b" \
   "DELETE FROM stg.week_calendar;" verify
 
+expect_fail "build_meta emptied (min_week_obs unreadable)" "verify 1d" \
+  "DELETE FROM stg.build_meta;" verify
+
+# 00_schema.sql:s egen guard, inte verify.sql:s. Den är byggtidsguarden som ska
+# döda körningen innan något hinner byggas på en NULL — och en oprövad guard är
+# precis hur de tröga kontrollerna kom in från början.
+schema_guard() {  # $1 = namn, $2 = "med"|"utan" min_week_obs, $3 = förväntad text
+  local name="$1" mode="$2" want="$3" out rc
+  rm -f "$TMP/g.duckdb"
+  { echo ".bail on"
+    echo "SET VARIABLE strict = true;"
+    echo "SET VARIABLE start_week = '2022-01-03';"
+    [ "$mode" = "med" ] && echo "SET VARIABLE min_week_obs = 3;"
+  } > "$TMP/g.sql"
+  out=$(duckdb "$TMP/g.duckdb" -f "$TMP/g.sql" -f pipeline/00_schema.sql 2>&1); rc=$?
+  if [ "$mode" = "utan" ]; then
+    if [ $rc -eq 0 ]; then
+      printf 'FAIL  %-44s built anyway without min_week_obs\n' "$name"; fail=$((fail+1))
+    elif ! printf '%s' "$out" | grep -q "$want"; then
+      printf 'FAIL  %-44s died, but not with "%s"\n      got: %s\n' \
+        "$name" "$want" "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
+    else
+      printf 'ok    %-44s -> %s\n' "$name" "$want"; pass=$((pass+1))
+    fi
+  else
+    if [ $rc -eq 0 ]; then
+      printf 'ok    %-44s -> builds\n' "$name"; pass=$((pass+1))
+    else
+      printf 'FAIL  %-44s should have built: %s\n' "$name" "$(printf '%s' "$out" | head -1)"
+      fail=$((fail+1))
+    fi
+  fi
+}
+
+schema_guard "00_schema without min_week_obs" utan "min_week_obs är inte satt"
+schema_guard "00_schema with min_week_obs"    med  ""
+
 expect_fail "daily axis emptied entirely" "verify 1c" \
   "DELETE FROM stg.day_axis;" verify
 
@@ -234,6 +271,15 @@ expect_fail "MA7 no longer equals its window" "verify 14" \
 expect_fail "MA7 emitted where the window is too thin" "verify 14" \
   "UPDATE stg.crack_daily_ma SET usd_per_bbl = 50.0
     WHERE obs_date = (SELECT min(obs_date) FROM stg.crack_daily_ma);" verify
+
+# En SAKNAD linjalpunkt, inte en felaktig. Exporten kryssjoinar dagsaxeln, så
+# den blir en null vid oförändrad arraylängd och check 17 ser den inte.
+expect_fail "an MA7 point dropped entirely" "verify 14" \
+  "DELETE FROM stg.crack_daily_ma
+    WHERE obs_date = DATE '2024-03-06' AND series_key = 'us_ulsd_brent';" verify
+
+expect_fail "an orphan MA7 point with no daily row" "verify 14" \
+  "INSERT INTO stg.crack_daily_ma VALUES (DATE '1999-01-04', 'us_ulsd_brent', 42.0);" verify
 
 expect_fail "a day appears twice on the daily axis" "verify 15" \
   "INSERT INTO stg.day_axis SELECT min(obs_date) FROM stg.day_axis;" verify

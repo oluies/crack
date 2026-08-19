@@ -49,6 +49,19 @@ SELECT CASE WHEN (SELECT count(*) FROM stg.day_axis) = 0
   THEN error('verify 1c: stg.day_axis is empty - checks 14, 15 and 16 are vacuous')
 END AS "1c daily axis is not empty";
 
+-- 1d. build_meta har en användbar min_week_obs.
+--
+--     Guarden i 00_schema.sql stänger "variabeln var inte satt vid bygget", inte
+--     "NULL vid kontrolltillfället". Varje läsare gör numera
+--     (SELECT min_week_obs FROM stg.build_meta), en okorrelerad skalär delfråga
+--     som ger NULL om tabellen är tom — och då är felläget exakt det som skulle
+--     tas bort: n >= NULL är NULL, check 13 och 14 får tomma mängder och
+--     rapporterar grönt. strict är av samma skäl coalesce:ad på sina två
+--     läsplatser; det här är den andra kolumnen i samma tabell.
+SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta WHERE min_week_obs IS NOT NULL) <> 1
+  THEN error('verify 1d: stg.build_meta has no usable min_week_obs - checks 13 and 14 are vacuous')
+END AS "1d build_meta usable";
+
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every
 --    positional values[] array in the published JSON against every other.
 SELECT CASE WHEN count(*) > 0
@@ -220,7 +233,7 @@ thin AS (
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 13: {} published weekly leg(s) rest on fewer than {} daily '
                     'observations (first: {} {}, {} obs) - a partial week must publish as NULL',
-                    count(*), (SELECT min_week_obs FROM stg.build_meta),
+                    count(*), coalesce((SELECT min_week_obs FROM stg.build_meta)::VARCHAR, 'unset'),
                     coalesce(min(week_start)::VARCHAR, 'none'),
                     coalesce((SELECT series_id FROM thin ORDER BY week_start, series_id LIMIT 1), 'none'),
                     coalesce((SELECT n FROM thin ORDER BY week_start, series_id LIMIT 1)::VARCHAR, 'none')))
@@ -235,22 +248,32 @@ FROM thin;
 --     Både värdet och tröskeln prövas: en punkt som borde saknas men finns är
 --     lika fel som en som finns men är fel.
 -- ---------------------------------------------------------------------------
+--     FULL OUTER JOIN, inte FROM crack_daily_ma: drevs jämförelsen från
+--     ma-tabellen kunde en rad som saknas DÄR aldrig jämföras mot något, och
+--     exporten kryssjoinar ändå dagsaxeln så att den blir en null vid oförändrad
+--     arraylängd — check 17 ser den alltså inte heller. Nu fälls både en punkt
+--     som saknas och en föräldralös punkt utan motsvarande dag.
 WITH recomputed AS (
   SELECT
-    m.obs_date, m.series_key, m.usd_per_bbl AS published,
-    (SELECT AVG(d.usd_per_bbl) FROM stg.crack_daily d
-      WHERE d.series_key = m.series_key
-        AND d.obs_date > m.obs_date - INTERVAL 7 DAY
-        AND d.obs_date <= m.obs_date)                      AS expected,
-    (SELECT count(d.usd_per_bbl) FROM stg.crack_daily d
-      WHERE d.series_key = m.series_key
-        AND d.obs_date > m.obs_date - INTERVAL 7 DAY
-        AND d.obs_date <= m.obs_date)                      AS n
-  FROM stg.crack_daily_ma m
+    coalesce(d.obs_date, m.obs_date)     AS obs_date,
+    coalesce(d.series_key, m.series_key) AS series_key,
+    m.usd_per_bbl                        AS published,
+    d.obs_date IS NULL                   AS orphan,
+    (SELECT AVG(x.usd_per_bbl) FROM stg.crack_daily x
+      WHERE x.series_key = coalesce(d.series_key, m.series_key)
+        AND x.obs_date > coalesce(d.obs_date, m.obs_date) - INTERVAL 7 DAY
+        AND x.obs_date <= coalesce(d.obs_date, m.obs_date))  AS expected,
+    (SELECT count(x.usd_per_bbl) FROM stg.crack_daily x
+      WHERE x.series_key = coalesce(d.series_key, m.series_key)
+        AND x.obs_date > coalesce(d.obs_date, m.obs_date) - INTERVAL 7 DAY
+        AND x.obs_date <= coalesce(d.obs_date, m.obs_date))  AS n
+  FROM stg.crack_daily d
+  FULL OUTER JOIN stg.crack_daily_ma m USING (obs_date, series_key)
 ),
 bad AS (
   SELECT * FROM recomputed
-  WHERE (n >= (SELECT min_week_obs FROM stg.build_meta)
+  WHERE orphan
+     OR (n >= (SELECT min_week_obs FROM stg.build_meta)
          AND (published IS NULL OR abs(published - expected) > 1e-9))
      OR (n <  (SELECT min_week_obs FROM stg.build_meta) AND published IS NOT NULL)
 )

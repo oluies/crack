@@ -608,6 +608,52 @@ else
   printf 'FAIL  %-44s should have stayed green\n' "database without build_meta"; fail=$((fail+1))
 fi
 
+# Vad run.sh GÖR med guardens utfall, inte bara vad guarden returnerar. Det som
+# lagades var att --verify-only blev oåtkomligt för den som saknar EIA-nyckel,
+# och den egenskapen ska hållas av sviten i stället för att stå i en kommentar:
+# en inverterad gren eller ett kvarglömt die lämnar annars allt grönt.
+#
+# Kör det RIKTIGA kommandot med flit. Läget finns redan — den här filen kräver
+# ett fixtures-bygge mot det committade trädet, alltså precis det par som är i
+# otakt — och --verify-only läser bara.
+# Vilket utfall som är RÄTT beror på vilket bygge som ligger i data/work. Det
+# committade trädet är alltid riktigt (ci.yml ser till det), så paret är i otakt
+# precis när databasen är ett fixtures-bygge. Provet läser läget i stället för
+# att anta ett: annars vore det grönt lokalt efter ett live-bygge och skulle
+# bara pröva något i CI, vilket är svårare att upptäcka än att det failar.
+verify_only_case() {
+  local name="--verify-only against the current build" out rc
+  out=$(pipeline/run.sh --verify-only 2>&1); rc=$?
+
+  if [ $rc -ne 0 ]; then
+    printf 'FAIL  %-44s exit %s\n      %s\n' "$name" "$rc" \
+      "$(printf '%s' "$out" | grep -m1 -E 'FEL|Error' || printf '%s' "$out" | tail -1)"
+    fail=$((fail+1)); return
+  fi
+
+  if [ "$SYNTHETIC" = "true" ]; then
+    # Fixtures-databas mot det committade riktiga trädet: ska degradera, inte dö,
+    # och inte hoppa över databasens egna invarianter på köpet.
+    if ! printf '%s' "$out" | grep -qF "hoppar över export-invarianterna"; then
+      printf 'FAIL  %-44s nådde fram men sa inte vad som hoppades över\n' "$name"; fail=$((fail+1))
+    elif ! printf '%s' "$out" | grep -qF "alla invarianter gröna"; then
+      printf 'FAIL  %-44s hoppade över för mycket\n' "$name"; fail=$((fail+1))
+    else
+      printf 'ok    %-44s -> degraderar (fixtures-par)\n' "$name"; pass=$((pass+1))
+    fi
+  else
+    # Live-bygge: paret hör ihop, så ingenting får hoppas över.
+    if printf '%s' "$out" | grep -qF "hoppar över"; then
+      printf 'FAIL  %-44s degraderade fast paret hör ihop\n' "$name"; fail=$((fail+1))
+    elif ! printf '%s' "$out" | grep -qF "export-invarianter gröna"; then
+      printf 'FAIL  %-44s körde inte export-invarianterna\n' "$name"; fail=$((fail+1))
+    else
+      printf 'ok    %-44s -> kör allt (live-par)\n' "$name"; pass=$((pass+1))
+    fi
+  fi
+}
+verify_only_case
+
 # --- the fetch retry logic ---------------------------------------------------
 #
 # The argument for the guard above applies to the retry too: the properties this

@@ -46,11 +46,16 @@ valid() { case "$1" in true|false) return 0 ;; *) return 1 ;; esac; }
 valid "$db_synth"   || exit 0
 valid "$file_synth" || exit 0
 
+# Ingen FEL:-prefix och inget botemedel här. Anroparen avgör om fyndet är
+# fatalt — run.sh --verify-only degraderar numera i stället för att dö — och en
+# hård felmärkning på en körning som slutar grönt är vad både en människa och en
+# loggsökning fastnar på. Exitkoden bär informationen; texten beskriver bara vad
+# som gäller. Exit 1 betyder ENBART "paret är i otakt": allt annat är ett fel i
+# den här kontrollen, och anroparen skiljer på dem.
 if [ "$db_synth" != "$file_synth" ]; then
-  echo "FEL: databasen och de publicerade filerna kommer inte ur samma körning" >&2
-  echo "     (databasen: synthetic=$db_synth, $FILE: synthetic=$file_synth)." >&2
-  echo "     Det inträffar efter 'pipeline/run.sh --fixtures', som återställer" >&2
-  echo "     site/public/data ur git men lämnar den syntetiska databasen kvar." >&2
-  echo "     Kör om bygget — pipeline/run.sh — innan du verifierar." >&2
+  echo "databasen och de publicerade filerna kommer inte ur samma körning" >&2
+  echo "  (databasen: synthetic=$db_synth, $FILE: synthetic=$file_synth)." >&2
+  echo "  Det inträffar efter 'pipeline/run.sh --fixtures', som återställer" >&2
+  echo "  site/public/data ur git men lämnar den syntetiska databasen kvar." >&2
   exit 1
 fi

@@ -160,16 +160,34 @@ if [ "$MODE" = "verify" ]; then
   # paret är i otakt om och om igen, och botemedlet guarden nämner (kör om
   # bygget) kräver just den nyckeln. Det gäller alla som nyss kört negative.sh,
   # som förutsätter ett fixtures-bygge.
-  if pipeline/check-build-pairing.sh "$DB" "$OUT_DIR"; then
-    say "kör invarianter"
-    duckdb "$DB" -f "$WORK/preamble.sql" \
-      -f pipeline/verify.sql -f pipeline/60_verify_export.sql
-    exit $?
-  fi
-  say "hoppar över export-invarianterna — de skulle jämföra den här databasen med"
-  say "filer den inte skrev. Databasens egna invarianter körs ändå."
-  duckdb "$DB" -f "$WORK/preamble.sql" -f pipeline/verify.sql
-  exit $?
+  # Exitkoden skiljs åt. Ett bart "if" hade behandlat 127 (skriptet saknas) och
+  # varje annat körningsfel som "paret är i otakt" och tyst hoppat över
+  # export-invarianterna — en kontroll som försvinner när den går sönder.
+  set +e
+  pipeline/check-build-pairing.sh "$DB" "$OUT_DIR"
+  pair_rc=$?
+  set -e
+
+  case "$pair_rc" in
+    0)
+      say "kör invarianter"
+      duckdb "$DB" -f "$WORK/preamble.sql" \
+        -f pipeline/verify.sql -f pipeline/60_verify_export.sql
+      exit $?
+      ;;
+    1)
+      say "hoppar över export-invarianterna — de skulle jämföra den här databasen"
+      say "med filer den inte skrev. Databasens egna invarianter körs ändå."
+      say "Behöver du även export-invarianterna: kör om pipeline/run.sh med en"
+      say "riktig EIA_API_KEY, så att databasen och filerna kommer ur samma körning."
+      duckdb "$DB" -f "$WORK/preamble.sql" -f pipeline/verify.sql
+      exit $?
+      ;;
+    *)
+      die "pipeline/check-build-pairing.sh gick inte att köra (status $pair_rc).
+     Det är inte samma sak som att paret är i otakt — kontrollen själv är trasig."
+      ;;
+  esac
 fi
 
 # Spara föregående utdata för jämförelsen nedan.

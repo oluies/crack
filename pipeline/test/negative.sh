@@ -153,6 +153,11 @@ expect_fail "build_meta emptied (min_week_obs unreadable)" "verify 1d" \
 # precis hur de tröga kontrollerna kom in från början.
 schema_guard() {  # $1 = namn, $2 = "med"|"utan" min_week_obs, $3 = förväntad text
   local name="$1" mode="$2" want="$3" out rc
+  # Tomt mönster matchar all utdata och degraderar provet till en ren
+  # exitkodskontroll — samma tysta no-op som guard() vägrar längre ned.
+  if [ "$mode" = "utan" ] && [ -z "$want" ]; then
+    die "schema_guard '$name': förväntat felmeddelande saknas"
+  fi
   rm -f "$TMP/g.duckdb"
   { echo ".bail on"
     echo "SET VARIABLE strict = true;"
@@ -163,7 +168,7 @@ schema_guard() {  # $1 = namn, $2 = "med"|"utan" min_week_obs, $3 = förväntad 
   if [ "$mode" = "utan" ]; then
     if [ $rc -eq 0 ]; then
       printf 'FAIL  %-44s built anyway without min_week_obs\n' "$name"; fail=$((fail+1))
-    elif ! printf '%s' "$out" | grep -q "$want"; then
+    elif ! printf '%s' "$out" | grep -qF "$want"; then
       printf 'FAIL  %-44s died, but not with "%s"\n      got: %s\n' \
         "$name" "$want" "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
     else
@@ -278,7 +283,15 @@ expect_fail "an MA7 point dropped entirely" "verify 14" \
   "DELETE FROM stg.crack_daily_ma
     WHERE obs_date = DATE '2024-03-06' AND series_key = 'us_ulsd_brent';" verify
 
+# Värdet är NULL med flit. Med 42.0 fälls raden redan av klausulen "publicerad
+# där fönstret är för tunt", och provet hade passerat även om orphan-termen togs
+# bort helt — alltså exakt en kontroll som inte kan fälla, rapporterad grön och
+# trodd. Med NULL är orphan den enda term som ser den.
 expect_fail "an orphan MA7 point with no daily row" "verify 14" \
+  "INSERT INTO stg.crack_daily_ma VALUES (DATE '1999-01-04', 'us_ulsd_brent', NULL);" verify
+
+# Kvar som eget prov, men rätt märkt: det är den tunna fönster-klausulen.
+expect_fail "MA7 value on a date with no daily row" "verify 14" \
   "INSERT INTO stg.crack_daily_ma VALUES (DATE '1999-01-04', 'us_ulsd_brent', 42.0);" verify
 
 expect_fail "a day appears twice on the daily axis" "verify 15" \

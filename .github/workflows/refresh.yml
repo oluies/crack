@@ -76,16 +76,13 @@ jobs:
       # If those files are absent the deploy would publish a site that renders
       # nothing but the "could not load the published data" banner, so fail here
       # instead of shipping it.
-      # Listan härleds ur 50_export.sql:s COPY-mål i stället för att räknas upp
-      # här. En hårdkodad lista är tyst för precis det fel som är lättast att
-      # göra — en ny exportfil — och den här listan hann sakna både
-      # usregions.json och cracks_daily.json innan någon märkte det.
+      # Listan härleds ur 50_export.sql:s COPY-mål via samma skript som
+      # check-export-paths.sh använder, inte ur en egen uppräkning. Den här
+      # listan hann sakna både usregions.json och cracks_daily.json innan
+      # någon märkte det, och en andra handhållen kopia hade gått isär igen.
       - name: Ensure published data exists
         run: |
-          targets=$(grep -oE "TO '[^']*\.json'" pipeline/50_export.sql | sed "s/^TO '//; s/'$//")
-          if [ -z "$targets" ]; then
-            echo "FEL: hittade inga COPY-mål i pipeline/50_export.sql"; exit 1
-          fi
+          targets=$(pipeline/export-targets.sh pipeline/50_export.sql)
           missing=0
           for f in $targets; do
             if [ ! -s "$f" ]; then

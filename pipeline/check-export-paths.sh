@@ -26,20 +26,11 @@ ROOT="$1"; OUT_DIR="$2"; EXPORT_SQL="$3"
 # repo root; out_dir is absolute. Compare them in the same terms.
 REL="${OUT_DIR#"$ROOT"/}"
 
-# Målen läses UR filen i stället för ur en lista här. En hårdkodad lista är
-# tyst för precis det fel som är lättast att göra — en ny COPY som skriver
-# någon annanstans — och den listan har redan hunnit bli inaktuell en gång.
-# || true är inte kosmetik: under set -e fäller grep:s exitkod 1 (inga träffar)
-# hela skriptet på tilldelningsraden, och diagnosen nedan blir oåtkomlig. Felet
-# hade då rapporterats som tom utdata i stället för som ett meddelande.
-TARGETS=$(grep -oE "TO '[^']*\.json'" "$EXPORT_SQL" | sed "s/^TO '//; s/'$//" || true)
-
-[ -n "$TARGETS" ] || {
-  echo "FEL: hittade inga COPY ... TO '...json'-mål i $EXPORT_SQL" >&2
-  echo "     Antingen har exporten slutat skriva JSON, eller så har formen ändrats" >&2
-  echo "     så att den här kontrollen inte längre ser målen — båda måste åtgärdas." >&2
-  exit 1
-}
+# Målen läses UR filen i stället för ur en lista här, och utvinningen ligger i
+# ett eget skript som deploy-grinden i refresh.yml delar. En hårdkodad lista är
+# tyst för precis det fel som är lättast att göra — en ny COPY-fil — och två
+# handhållna kopior av samma lista hann gå isär innan någon märkte det.
+TARGETS=$("$(dirname "$0")/export-targets.sh" "$EXPORT_SQL")
 
 wrong=""
 for t in $TARGETS; do

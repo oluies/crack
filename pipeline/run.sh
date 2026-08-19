@@ -58,13 +58,35 @@ done
 # tyst titta i den gamla.
 OUT_DIR="$ROOT/site/public/data"
 
+# CRACK_DB / CRACK_OUT_DIR — bara i verify-läget, och bara för pipeline/test.
+#
+# --verify-only exporterar ingenting; det läser en databas och ett publicerat
+# träd. Utan de här går den ena grenen av utfallshanteringen längre ned aldrig
+# att köra automatiskt: CI kör bara --fixtures, så paret är alltid i otakt och
+# den matchande grenen — den enda plats där export-invarianterna körs under
+# --verify-only — testas ingenstans. Ett tappat -f skulle inte synas.
+#
+# Inte i live/offline/fixtures: där SKRIVER exporten till strängliteraler i
+# 50_export.sql, och en flyttbar utkatalog skulle bara låta dem gå isär tyst.
+OUT_DIR_PINNED=true
+if [ "$MODE" = "verify" ]; then
+  if [ -n "${CRACK_DB:-}" ]; then DB="$CRACK_DB"; fi
+  if [ -n "${CRACK_OUT_DIR:-}" ]; then OUT_DIR="$CRACK_OUT_DIR"; OUT_DIR_PINNED=false; fi
+fi
+
 mkdir -p "$WORK" "$OUT_DIR" data/manual
 
 # Exporten skriver till strängliteraler, verifieringen läser ur out_dir. Kollas
 # före hämtningarna: ett felkonfigurerat par ska inte kosta fyra nedladdningar
 # först. Egen skript-fil så att negative.sh kan bevisa att kontrollen fäller.
-pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
-  || die "exporten och verifieringen pekar på olika kataloger (se ovan)"
+#
+# Hoppas över när utkatalogen är omdirigerad: kontrollen jämför 50_export.sql:s
+# literaler mot OUT_DIR, och mot en riggkatalog vore svaret alltid nej — utan
+# att säga något om konfigurationen den finns för att bevaka.
+if [ "$OUT_DIR_PINNED" = true ]; then
+  pipeline/check-export-paths.sh "$ROOT" "$OUT_DIR" pipeline/50_export.sql \
+    || die "exporten och verifieringen pekar på olika kataloger (se ovan)"
+fi
 
 case "$MODE" in
   live)

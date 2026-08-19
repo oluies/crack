@@ -632,43 +632,52 @@ fi
 # Kör det RIKTIGA kommandot med flit. Läget finns redan — den här filen kräver
 # ett fixtures-bygge mot det committade trädet, alltså precis det par som är i
 # otakt — och --verify-only läser bara.
-# Vilket utfall som är RÄTT beror på vilket bygge som ligger i data/work. Det
-# committade trädet är alltid riktigt (ci.yml ser till det), så paret är i otakt
-# precis när databasen är ett fixtures-bygge. Provet läser läget i stället för
-# att anta ett: annars vore det grönt lokalt efter ett live-bygge och skulle
-# bara pröva något i CI, vilket är svårare att upptäcka än att det failar.
-verify_only_case() {
-  local name="--verify-only against the current build" out rc
-  out=$(pipeline/run.sh --verify-only 2>&1); rc=$?
+# Bägge grenarna av run.sh:s utfallshantering, deterministiskt och oberoende av
+# vilket bygge som ligger i data/work.
+#
+# Tidigare läste provet läget och prövade den gren som råkade gälla — vilket i
+# CI alltid är fixtures, så den MATCHANDE grenen kördes ingenstans. Det är den
+# enda plats där export-invarianterna körs under --verify-only, så ett tappat
+# "-f pipeline/60_verify_export.sql" hade varit osynligt. CRACK_DB/CRACK_OUT_DIR
+# finns i run.sh för precis det här och honoreras bara i verify-läget.
+verify_only_case() {  # $1 = namn, $2 = stämpel i filerna, $3 = "full"|"degraded"
+  local name="$1" stamp="$2" want="$3" out rc
+  reset_copy
+  python3 "$TMP/stamp.py" "$TMP/data" "$stamp" || die "verify_only_case: kunde inte stämpla"
+
+  out=$(CRACK_DB="$TMP/t.duckdb" CRACK_OUT_DIR="$TMP/data" \
+        pipeline/run.sh --verify-only 2>&1); rc=$?
 
   if [ $rc -ne 0 ]; then
     printf 'FAIL  %-44s exit %s\n      %s\n' "$name" "$rc" \
       "$(printf '%s' "$out" | grep -m1 -E 'FEL|Error' || printf '%s' "$out" | tail -1)"
-    fail=$((fail+1)); return
+    fail=$((fail+1)); return 0
   fi
 
-  if [ "$SYNTHETIC" = "true" ]; then
-    # Fixtures-databas mot det committade riktiga trädet: ska degradera, inte dö,
-    # och inte hoppa över databasens egna invarianter på köpet.
-    if ! printf '%s' "$out" | grep -qF "hoppar över export-invarianterna"; then
-      printf 'FAIL  %-44s nådde fram men sa inte vad som hoppades över\n' "$name"; fail=$((fail+1))
-    elif ! printf '%s' "$out" | grep -qF "alla invarianter gröna"; then
-      printf 'FAIL  %-44s hoppade över för mycket\n' "$name"; fail=$((fail+1))
-    else
-      printf 'ok    %-44s -> degraderar (fixtures-par)\n' "$name"; pass=$((pass+1))
-    fi
-  else
-    # Live-bygge: paret hör ihop, så ingenting får hoppas över.
+  if [ "$want" = "full" ]; then
     if printf '%s' "$out" | grep -qF "hoppar över"; then
       printf 'FAIL  %-44s degraderade fast paret hör ihop\n' "$name"; fail=$((fail+1))
     elif ! printf '%s' "$out" | grep -qF "export-invarianter gröna"; then
       printf 'FAIL  %-44s körde inte export-invarianterna\n' "$name"; fail=$((fail+1))
     else
-      printf 'ok    %-44s -> kör allt (live-par)\n' "$name"; pass=$((pass+1))
+      printf 'ok    %-44s -> kör bägge uppsättningarna\n' "$name"; pass=$((pass+1))
+    fi
+  else
+    if ! printf '%s' "$out" | grep -qF "hoppar över export-invarianterna"; then
+      printf 'FAIL  %-44s nådde fram men sa inte vad som hoppades över\n' "$name"; fail=$((fail+1))
+    elif ! printf '%s' "$out" | grep -qF "alla invarianter gröna"; then
+      printf 'FAIL  %-44s hoppade över för mycket\n' "$name"; fail=$((fail+1))
+    else
+      printf 'ok    %-44s -> degraderar, kör databasens\n' "$name"; pass=$((pass+1))
     fi
   fi
+  return 0
 }
-verify_only_case
+
+# $SYNTHETIC hör ihop med databasen; motsatsen gör det inte.
+if [ "$SYNTHETIC" = "true" ]; then VO_OTHER=false; else VO_OTHER=true; fi
+verify_only_case "--verify-only, matched pair"    "$SYNTHETIC" full
+verify_only_case "--verify-only, mismatched pair" "$VO_OTHER"  degraded
 
 # Den gren som hela förra commiten fanns för, och den enda inget körde: guarden
 # går inte att KÖRA. Ett bart "if" hade behandlat 127 som "paret är i otakt" och
@@ -710,8 +719,10 @@ bad_call() {  # $1 = vad som prövas, $2.. = argumenten
   # Avsikten OCH de faktiska argumenten, med $TMP maskerad. Bara avsikten vore
   # handskriven och kunde glida isär från anropet utan att något märkte det;
   # bara argumenten ger en oläsbar sökväg som dessutom skiftar varje körning.
-  shown="${*//$TMP/\$TMP}"
-  label="wrong call: $intent [${shown:-}]"
+  # Citerade var för sig: annars är utskriften för just de tomma fallen — dem
+  # helheten finns för — helt blank, vilket är precis det som ska synas.
+  if [ $# -eq 0 ]; then shown=""; else shown=$(printf "'%s' " "$@"); fi
+  label="wrong call: $intent [${shown//$TMP/\$TMP}]"
 
   out=$(pipeline/check-build-pairing.sh "$@" 2>&1); rc=$?
 

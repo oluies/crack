@@ -70,12 +70,23 @@ case "$SYNTHETIC" in
 esac
 
 TMP="$(mktemp -d)"
+# Sökvägen är $ROOT-ankrad som allt annat i filen, felet tystas inte, och biten
+# rörs bara om den faktiskt behöver återställas — ett avbrott före
+# broken_guard_case ska inte skriva om lägesbiten på en spårad fil.
+restore_guard_mode() {
+  local f="$ROOT/pipeline/check-build-pairing.sh"
+  [ -e "$f" ] || return 0
+  [ -x "$f" ] && return 0
+  chmod +x "$f" \
+    || echo "VARNING: kunde inte återställa lägesbiten på $f — kör: chmod +x $f" >&2
+}
+
 # Lägesbiten på check-build-pairing.sh återställs HÄR och inte bara i provets
 # egen RETURN-trap: provets långsamma steg är en full invariantkörning, och ett
 # avbrott där (Ctrl-C, en dödad CI-step) hoppar över RETURN. Trädet skulle då
 # ligga kvar med en icke körbar guard — provet som finns för att visa att
 # kontroller inte är tröga hade lämnat efter sig en som verkligen är det.
-trap 'rm -rf "$TMP"; chmod +x pipeline/check-build-pairing.sh 2>/dev/null || true' EXIT
+trap 'rm -rf "$TMP"; restore_guard_mode' EXIT
 mkdir -p "$TMP/data"
 
 pass=0; fail=0
@@ -691,17 +702,26 @@ broken_guard_case
 # Felaktigt anrop är 2, inte 1. Skulle det bli 1 läser run.sh det som "paret är i
 # otakt" och degraderar tyst i stället för att säga att anropet är fel — och
 # ${1:?} gav precis 1, vilket är varför raden finns.
-for args in "" "bara-ett"; do
-  # shellcheck disable=SC2086
-  pipeline/check-build-pairing.sh $args >/dev/null 2>&1
-  rc=$?
-  label="wrong arg count (${args:-inga argument})"
+# Utdatan behålls: en röd som bara säger "exit 1, väntade 2" döljer vilken gren
+# som kördes, och det är den här filens hela poäng att en röd förklarar sig.
+bad_call() {  # $@ = argumenten att pröva
+  local out rc label
+  label="wrong call: $(if [ $# -eq 0 ]; then printf 'inga argument'; else printf "'%s' " "$@"; fi)"
+  out=$(pipeline/check-build-pairing.sh "$@" 2>&1); rc=$?
   if [ "$rc" = 2 ]; then
     printf 'ok    %-44s -> exit 2\n' "$label"; pass=$((pass+1))
   else
-    printf 'FAIL  %-44s -> exit %s, väntade 2\n' "$label" "$rc"; fail=$((fail+1))
+    printf 'FAIL  %-44s -> exit %s, väntade 2\n      %s\n' "$label" "$rc" \
+      "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
   fi
-done
+}
+
+bad_call
+bad_call "bara-ett"
+# Två TOMMA argument passerar en ren antalskontroll. ${1:?} fällde dem; en
+# $#-kontroll ensam gör det inte, och svaret blir exit 0 på ett trasigt anrop.
+bad_call "" ""
+bad_call "$TMP/t.duckdb" ""
 
 # --- the fetch retry logic ---------------------------------------------------
 #

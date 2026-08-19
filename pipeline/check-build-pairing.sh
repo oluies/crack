@@ -25,10 +25,6 @@
 # which names the field. Reporting them here as well would be two diagnoses for
 # one fault, and the worse of the two would come first.
 #
-# Silent (exit 0) when either side is missing or unstamped: an absent cracks.json
-# is export check 8's business, and this guard reporting it would be a second
-# diagnosis for one fault.
-#
 #   check-build-pairing.sh <db> <out_dir>
 
 set -euo pipefail
@@ -36,7 +32,10 @@ set -euo pipefail
 # Exitkod 1 är reserverad för ETT utfall: paret är i otakt. ${1:?} avslutar med
 # just 1, så ett saknat argument hade lästs av run.sh som en obalans och tyst
 # degraderat i stället för att säga att anropet är fel. Användningsfel är 2.
-if [ $# -ne 2 ]; then
+# Tomma argument räknas som saknade. "" "" är två argument och passerar en ren
+# antalskontroll, men ${1:?} — som den här raden ersatte — fällde dem, och utan
+# det här ledet blir svaret exit 0 ("inget att jämföra") på ett trasigt anrop.
+if [ $# -ne 2 ] || [ -z "${1:-}" ] || [ -z "${2:-}" ]; then
   echo "usage: check-build-pairing.sh <db> <out_dir>" >&2
   exit 2
 fi

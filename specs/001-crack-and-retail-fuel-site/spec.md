@@ -182,8 +182,10 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
 - **Sources disagree on the week.** EIA spot prices are daily, EIA retail is weekly
   on Mondays, and the Oil Bulletin publishes weekly on Mondays covering the prior
-  week. All observations are bucketed to an ISO week and keyed to that week's Monday;
-  a partial current week is dropped rather than shown as a dip.
+  week. All observations are bucketed to an ISO week and keyed to that week's Monday.
+  A partial week is caught by the coverage floor on daily-sampled sources rather than
+  by dropping the current week, and a current week a survey has already published is
+  kept — see the amendment on FR-007.
 - **A country stops reporting.** Croatia joined the euro; Bulgaria adopted it in
   2026; the UK appears in the Oil Bulletin history but is not in the EU-27. Country
   membership is resolved from an explicit list, not from whatever columns happen to
@@ -234,7 +236,9 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
   - **Which weeks exist** is now the axis's job. It ends at the later of the last
     complete week and the most recent week a weekly point-in-time survey has
-    published, capped at the build week (004, FR-301/FR-302). Excluding the current
+    published, capped at the current week (004, FR-301/FR-302) — which is the
+    *build* week in practice, since 004 FR-308 freezes "today" at build time so
+    `--verify-only` judges the axis by the day it was built. Excluding the current
     week unconditionally discarded a published retail price for up to seven days —
     for a survey, one observation *is* the week.
   - **Whether a week has enough data** is now `min_week_obs` (003, FR-201), and

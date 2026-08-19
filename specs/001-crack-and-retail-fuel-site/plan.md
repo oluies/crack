@@ -24,7 +24,9 @@ in [research.md](./research.md).
 (pipeline); POSIX shell for sequencing.
 
 **Primary Dependencies**: Laminar 17.2.0; ECharts 5 from jsDelivr CDN via a
-hand-written `js.native` facade. DuckDB `excel`, `httpfs`, and `json` extensions.
+hand-written `js.native` facade. DuckDB `excel` and `json` extensions — not
+`httpfs`: every download is done by `run.sh` with curl, so DuckDB only ever reads
+local files.
 No npm, no bundler, no ScalablyTyped.
 
 **Storage**: Static JSON files under `site/public/data/`. A DuckDB database file

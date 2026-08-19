@@ -86,7 +86,8 @@ the last daily observation; each chart states its own coverage.
 ## Requirements *(mandatory)*
 
 - **FR-301**: The week axis MUST extend to the most recent week in which a weekly
-  point-in-time survey has published, capped at the current week.
+  point-in-time survey has published, capped at the current week — which FR-308
+  fixes to the week the database was built.
 - **FR-302**: The axis MUST NOT end before the last complete week, whatever the
   sources have published.
 - **FR-303**: Only weekly point-in-time sources may extend the axis. Daily-sampled

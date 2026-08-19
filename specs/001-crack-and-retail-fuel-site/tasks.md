@@ -26,7 +26,7 @@ Independently shippable: the crack chart works with EIA alone.
 
 - **T006** `pipeline/sources.env` — endpoint URLs, the Oil Bulletin UUID, the
   2022-01-03 start date. Configuration, not constants (research.md).
-- **T007** `pipeline/00_schema.sql` — load `json`/`excel`/`httpfs`, create the
+- **T007** `pipeline/00_schema.sql` — load `json`/`excel`, create the
   staging schema, `build_meta` and the `eu27` reference table.
   *(`week_calendar` was built here originally; 004 moved it to
   `pipeline/25_calendar.sql`, because its upper bound depends on what the sources

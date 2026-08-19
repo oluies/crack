@@ -17,9 +17,11 @@
 --
 --   grep -rE "getvariable|build_meta" pipeline/
 --
--- strict and min_week_obs are read downstream OUT OF stg.build_meta, not through
--- getvariable() — that is the whole point of recording them here — so grepping
--- for getvariable alone finds only this file and makes them look unused.
+-- min_week_obs is read downstream only OUT OF stg.build_meta, never through
+-- getvariable(), so grepping for getvariable alone makes it look unused. strict
+-- appears both ways, and legitimately: 50_export.sql reads the variable because
+-- it runs at build time, while verify.sql reads the table because it must also
+-- survive --verify-only, which has no preamble.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

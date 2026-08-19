@@ -4,17 +4,16 @@
 --
 -- Variables this file reads (set by run.sh's generated preamble):
 --   strict        whether the freshness invariants are fatal for this build
---   min_week_obs  minimum daily observations behind a publishable week
+--   min_week_obs  minimum daily observations behind a published week AND behind
+--                 a point on the 7-day mean — run.sh sets one value for both so
+--                 the two rules cannot drift apart
 --
--- Not work_dir or start_week.
---
--- work_dir is the directory curl downloads into, read by 10/15/30. It is the
--- directory that distinguishes them, not the role: 20 and 40 parse files too,
--- but by way of ob_path and manual_dir.
---
--- start_week is read wherever a source is trimmed — 10/15/20/40 — and by
--- 25_calendar.sql, where it is the axis's lower bound. That last reading is why
--- it must not be listed here: it would re-imply what the third line above denies.
+-- work_dir and start_week are absent on purpose: they belong to the scripts that
+-- read the sources, not to this one. start_week in particular is the week axis's
+-- lower bound, and the axis is built in 25_calendar.sql. Three attempts at a
+-- fuller map of which script reads which variable were each wrong in a new way;
+-- the list above is what this file reads, and `grep getvariable pipeline/` is a
+-- better answer than a prose summary that has to be maintained by hand.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

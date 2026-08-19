@@ -293,7 +293,7 @@ expect_fail "an orphan MA7 point with no daily row" "verify 14" \
 # Ett andra prov med ett VÄRDE på samma datum vore meningslöst: varje datum utan
 # dagsrad är per definition orphan, så orphan-termen fäller det först och provet
 # hade varit grönt även med den tunna fönster-klausulen borttagen. Den klausulen
-# prövas i stället av "MA7 emitted where the window is too thin" nedan, som
+# prövas i stället av "MA7 emitted where the window is too thin" ovan, som
 # ligger på seriens första dag — den finns i crack_daily, alltså orphan = false.
 
 expect_fail "a day appears twice on the daily axis" "verify 15" \

@@ -13,6 +13,10 @@
 # Its own file rather than a few lines inside run.sh so negative.sh can prove it
 # both fires and stays green — an untested guard is how the inert checks got in.
 #
+# Exit codes: 0 = they agree (or there is nothing to compare), 1 = they disagree,
+# 2 = this script was called wrongly. run.sh dispatches on them, so 1 must mean
+# one thing only.
+#
 # Silent (exit 0) when either side is missing or unstamped: an absent cracks.json
 # is export check 8's business, and this guard reporting it would be a second
 # diagnosis for one fault.
@@ -21,8 +25,16 @@
 
 set -euo pipefail
 
-DB="${1:?usage: check-build-pairing.sh <db> <out_dir>}"
-OUT_DIR="${2:?usage: check-build-pairing.sh <db> <out_dir>}"
+# Exitkod 1 är reserverad för ETT utfall: paret är i otakt. ${1:?} avslutar med
+# just 1, så ett saknat argument hade lästs av run.sh som en obalans och tyst
+# degraderat i stället för att säga att anropet är fel. Användningsfel är 2.
+if [ $# -ne 2 ]; then
+  echo "usage: check-build-pairing.sh <db> <out_dir>" >&2
+  exit 2
+fi
+
+DB="$1"
+OUT_DIR="$2"
 FILE="$OUT_DIR/cracks.json"
 
 # Läses med duckdb, inte med grep: en grep efter "synthetic":[a-z]* kopplar

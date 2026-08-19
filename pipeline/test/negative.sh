@@ -654,6 +654,34 @@ verify_only_case() {
 }
 verify_only_case
 
+# Den gren som hela förra commiten fanns för, och den enda inget körde: guarden
+# går inte att KÖRA. Ett bart "if" hade behandlat 127 som "paret är i otakt" och
+# tyst hoppat över export-invarianterna — en kontroll som försvinner när den går
+# sönder, vilket är oskiljbart från en som aldrig fungerade.
+#
+# Lägesbiten är spårad av git, så den återställs även om provet dör på vägen.
+broken_guard_case() {
+  local name="--verify-only when the guard cannot run" out rc
+  chmod -x pipeline/check-build-pairing.sh || {
+    printf 'FAIL  %-44s chmod misslyckades\n' "$name"; fail=$((fail+1)); return; }
+  trap 'chmod +x pipeline/check-build-pairing.sh' RETURN
+
+  out=$(pipeline/run.sh --verify-only 2>&1); rc=$?
+
+  if [ $rc -eq 0 ]; then
+    printf 'FAIL  %-44s verifierade ändå\n' "$name"; fail=$((fail+1))
+  elif printf '%s' "$out" | grep -qF "hoppar över"; then
+    printf 'FAIL  %-44s degraderade — ett trasigt skript lästes som obalans\n' "$name"
+    fail=$((fail+1))
+  elif ! printf '%s' "$out" | grep -qF "kontrollen själv är trasig"; then
+    printf 'FAIL  %-44s dog, men inte med rätt diagnos\n      %s\n' "$name" \
+      "$(printf '%s' "$out" | tail -1)"; fail=$((fail+1))
+  else
+    printf 'ok    %-44s -> dör, säger att kontrollen är trasig\n' "$name"; pass=$((pass+1))
+  fi
+}
+broken_guard_case
+
 # --- the fetch retry logic ---------------------------------------------------
 #
 # The argument for the guard above applies to the retry too: the properties this

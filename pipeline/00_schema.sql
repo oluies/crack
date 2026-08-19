@@ -6,10 +6,15 @@
 --   strict        whether the freshness invariants are fatal for this build
 --   min_week_obs  minimum daily observations behind a publishable week
 --
--- Not work_dir or start_week. work_dir belongs to the loaders (10/15/30);
--- start_week is read wherever a source is trimmed (10/15/20/40) as well as by
--- 25_calendar.sql, where it is the axis's lower bound — and that last reading is
--- why listing it here would re-imply the very thing the third line above denies.
+-- Not work_dir or start_week.
+--
+-- work_dir is the directory curl downloads into, read by 10/15/30. It is the
+-- directory that distinguishes them, not the role: 20 and 40 parse files too,
+-- but by way of ob_path and manual_dir.
+--
+-- start_week is read wherever a source is trimmed — 10/15/20/40 — and by
+-- 25_calendar.sql, where it is the axis's lower bound. That last reading is why
+-- it must not be listed here: it would re-imply what the third line above denies.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

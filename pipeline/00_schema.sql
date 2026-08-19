@@ -27,6 +27,12 @@
 -- fixtures-grenen). Ett omverifierat fixtures-bygge skulle alltså bedömas
 -- strikt mot en fryst ögonblicksbild. Tabellen minns vad som gällde när datan
 -- byggdes; variabeln beskriver bara det här anropet.
+--
+-- 50_export.sql läser tabellen av ett ANNAT skäl — exporten körs aldrig under
+-- --verify-only. Där handlar det om coalesce:n nedan: en osatt variabel ger
+-- NULL, NOT NULL är NULL, och meta.synthetic hade publicerats som null i varje
+-- fil. Stämpeln är hela skyddet mot att publicera fixtures-data, och CI letar
+-- efter "synthetic":true, så ett null hade glidit rakt igenom.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

@@ -55,12 +55,6 @@ FROM (
       WHEN f <> 'cracks_daily.json'
            AND json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
-      -- Måste vara ett BOOLEAN, inte bara närvarande. meta.synthetic är hela
-      -- skyddet mot att publicera fixtures-data, och ci.yml letar efter
-      -- "synthetic":true — ett null hade alltså glidit förbi tyst, vilket är
-      -- precis det utfallet stämpeln finns för att omöjliggöra.
-      WHEN json_type(json->'$.meta.synthetic') IS DISTINCT FROM 'BOOLEAN'
-        THEN 'meta.synthetic is not a boolean'
       WHEN f = 'usregions.json' AND (json_type(json->'$.regions') IS DISTINCT FROM 'ARRAY'
                                   OR json_array_length(json->'$.regions') = 0
                                   OR json_type(json->'$.regions[0].values') IS DISTINCT FROM 'ARRAY')
@@ -91,9 +85,41 @@ FROM (
       WHEN f =  'fx.json' AND (json_type(json->'$.rates.USD') IS DISTINCT FROM 'ARRAY'
                             OR json_type(json->'$.rates.SEK') IS DISTINCT FROM 'ARRAY')
         THEN 'rates.USD/SEK is not an array'
+      -- Sist, efter de strukturella sonderingarna. CASE ger första träffen, och
+      -- de ovan är de som annars gör read_json:s schema obindbart — en fil som
+      -- tappat BÅDE meta.synthetic och series[].values ska diagnosticeras på det
+      -- som bryter bindningen, inte på metadatan. Ordningen är filens egen regel.
+      --
+      -- BOOLEAN, inte bara närvarande: meta.synthetic är skyddet mot att
+      -- publicera fixtures-data och ci.yml letar efter "synthetic":true, så ett
+      -- null hade glidit rakt igenom.
+      WHEN json_type(json->'$.meta.synthetic') IS DISTINCT FROM 'BOOLEAN'
+        THEN 'meta.synthetic is not a boolean'
     END AS why
   FROM published
 ) WHERE why IS NOT NULL;
+
+-- 8b. Stämpeln stämmer med bygget den kom ur.
+--
+--     Check 8 kräver att meta.synthetic är ett booleskt värde men inte att det är
+--     RÄTT booleskt värde. En export som stämplade fel polaritet — eller som
+--     hårdkodade false — hade passerat 8, passerat CI:s grep efter
+--     "synthetic":true, och publicerat sinuskurvor märkta som riktig data. Det är
+--     exakt incidenten stämpeln infördes för, så polariteten kontrolleras mot
+--     stg.build_meta i stället för att antas.
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 8b: {} file(s) carry the wrong meta.synthetic for this build '
+                    '(strict={}, so synthetic must be {}): {}',
+                    count(*),
+                    coalesce((SELECT strict FROM stg.build_meta)::VARCHAR, 'unknown'),
+                    coalesce((SELECT NOT strict FROM stg.build_meta)::VARCHAR, 'unknown'),
+                    coalesce(string_agg(f, ', ' ORDER BY f), '?')))
+END AS "8b synthetic stamp matches the build"
+FROM (
+  SELECT f FROM published
+  WHERE (json->>'$.meta.synthetic')::BOOLEAN
+        IS DISTINCT FROM (SELECT NOT strict FROM stg.build_meta)
+);
 
 -- 9. Every series in cracks.json is aligned to weeks[].
 --

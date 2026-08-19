@@ -46,11 +46,34 @@ die() { echo "FEL: $*" >&2; exit 2; }
 command -v python3 >/dev/null  || die "python3 krävs för JSON-korruptionerna"
 command -v duckdb  >/dev/null  || die "duckdb krävs"
 
+# SRC_DB kommer från ett --fixtures-bygge (strict=false) medan SRC_JSON är den
+# committade RIKTIGA datan (synthetic=false): run.sh återställer trädet efter
+# --fixtures, med flit. Paret är alltså inkonsekvent, och check 8b — som jämför
+# stämpeln mot bygget — fäller då varenda export-prov med fel diagnos.
+#
+# Stämpeln i KOPIORNA riktas därför efter databasen innan något prov körs. Det
+# lagar en egenskap hos riggen, inte hos produktionen, där båda kommer ur samma
+# körning. Läses en gång: strict är konstant i SRC_DB.
+SYNTHETIC=$(duckdb "$SRC_DB" -noheader -list -c 'SELECT NOT strict FROM stg.build_meta') \
+  || die "kunde inte läsa strict ur $SRC_DB"
+
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/data"
 
 pass=0; fail=0
+
+# Egen fil, inte ett heredoc inuti reset_copy: ett heredoc i en funktion som
+# själv skrivs ut ur ett heredoc är hur den här raden gick sönder första gången.
+cat > "$TMP/stamp.py" <<'STAMP_PY'
+import json, sys, glob, os
+d, val = sys.argv[1], sys.argv[2].strip().lower() == 'true'
+for f in glob.glob(os.path.join(d, '*.json')):
+    o = json.load(open(f))
+    if isinstance(o.get('meta'), dict):
+        o['meta']['synthetic'] = val
+    json.dump(o, open(f, 'w'))
+STAMP_PY
 
 # Skrivs en gång, inte per prov: ett prov som råkar köra först ska inte avgöra
 # om filen finns.
@@ -70,6 +93,8 @@ reset_copy() {
   cp "$SRC_DB" "$TMP/t.duckdb"
   rm -rf "$TMP/data"; mkdir -p "$TMP/data"
   cp "$SRC_JSON"/*.json "$TMP/data/"
+  python3 "$TMP/stamp.py" "$TMP/data" "$SYNTHETIC" \
+    || die "kunde inte rikta meta.synthetic i kopiorna"
 }
 
 # Kör korruptionen och KRÄVER att den lyckades. En korruption som felar lämnar
@@ -364,6 +389,10 @@ expect_fail "meta.synthetic is null, not a boolean" "verify 8" \
 
 expect_fail "meta.synthetic missing entirely" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"retail.json\"));del d[\"meta\"][\"synthetic\"];json.dump(d,open(\"retail.json\",\"w\"))"' export
+
+# Rätt typ men fel värde: check 8 ser bara att det ÄR ett booleskt värde.
+expect_fail "synthetic stamp contradicts the build" "verify 8b" \
+  '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"meta\"][\"synthetic\"]=not d[\"meta\"][\"synthetic\"];json.dump(d,open(\"fx.json\",\"w\"))"' export
 
 expect_fail "cracks.json series emptied" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"cracks.json\"));d[\"series\"]=[];json.dump(d,open(\"cracks.json\",\"w\"))"' export

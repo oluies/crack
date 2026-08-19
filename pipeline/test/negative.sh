@@ -576,6 +576,28 @@ else
   printf 'FAIL  %-44s should have stayed green\n' "no cracks.json to compare"; fail=$((fail+1))
 fi
 
+# De två tysta grenarna. Bägge lämnar diagnosen till export-check 8, och utan
+# prov skulle en regression som tog bort valid()-grinden få guarden att fälla på
+# ett fel som inte är dess — två diagnoser för ett fel.
+reset_copy
+python3 -c "
+import json
+f='$TMP/data/cracks.json'
+d=json.load(open(f)); d['meta']['synthetic']=None; json.dump(d,open(f,'w'))" \
+  || die "kunde inte skriva en ostämplad cracks.json"
+if pipeline/check-build-pairing.sh "$TMP/t.duckdb" "$TMP/data" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "cracks.json present but unstamped"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "cracks.json present but unstamped"; fail=$((fail+1))
+fi
+
+reset_copy
+if pipeline/check-build-pairing.sh "$TMP/ingen-sadan.duckdb" "$TMP/data" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "no database to compare"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "no database to compare"; fail=$((fail+1))
+fi
+
 # --- the fetch retry logic ---------------------------------------------------
 #
 # The argument for the guard above applies to the retry too: the properties this

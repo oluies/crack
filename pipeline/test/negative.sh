@@ -138,6 +138,12 @@ echo "negativa prov — varje invariant måste kunna fälla:"
 
 # --- staging -----------------------------------------------------------------
 
+# En TOM veckoaxel, inte bara en lucka i den. Före check 1b passerade
+# DELETE FROM stg.week_calendar hela verify.sql grönt: villkoren, inte bara
+# meddelandena, blir NULL när axeln är borta.
+expect_fail "week calendar emptied entirely" "verify 1b" \
+  "DELETE FROM stg.week_calendar;" verify
+
 expect_fail "week calendar gap" "verify 1" \
   "DELETE FROM stg.week_calendar WHERE week_start = DATE '2023-06-05';" verify
 
@@ -282,6 +288,25 @@ expect_fail "the daily axis goes backwards" "verify 18" \
 expect_fail "daily file grows a weeks axis" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));d[\"weeks\"]=d[\"days\"];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
 
+# Check 8 sonderar bara series[0]. Ett ANDRA element utan "key" passerar
+# därför dit, når check 9 som en rad med key = NULL, och gav före härdningen
+# string_agg över idel NULL -> NULL -> error(NULL) -> grönt på en avkortad
+# serie. Korruptionen gör bägge sakerna, annars finns inget fel att rapportera.
+expect_fail "cracks.json: non-first series loses its key" "verify 9" \
+  '!python3 -c "import json;d=json.load(open(\"cracks.json\"));s=d[\"series\"][1];s.pop(\"key\");s[\"values\"]=s[\"values\"][:50];json.dump(d,open(\"cracks.json\",\"w\"))"' export
+
+expect_fail "cracks_daily.json: non-first series loses its key" "verify 17" \
+  '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));s=d[\"series\"][1];s.pop(\"key\");s[\"values\"]=s[\"values\"][:50];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
+
+expect_fail "usregions.json: non-first region loses its code" "verify 11b" \
+  '!python3 -c "import json;d=json.load(open(\"usregions.json\"));s=d[\"regions\"][1];s.pop(\"code\");s[\"values\"]=s[\"values\"][:50];json.dump(d,open(\"usregions.json\",\"w\"))"' export
+
+# Check 10 rapporterar via any_value(w) ur bad; en retail-fil vars weeks-nyckel
+# är borta gör den NULL. Check 8 tar den först — vilket är precis vad som ska
+# hända — men provet finns för att den ordningen ska vara prövad, inte antagen.
+expect_fail "retail.json loses its weeks axis" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"retail.json\"));del d[\"weeks\"];json.dump(d,open(\"retail.json\",\"w\"))"' export
+
 expect_fail "week axes disagree" "verify 12" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"weeks\"]=[\"1999-01-04\"]+d[\"weeks\"][1:];json.dump(d,open(\"fx.json\",\"w\"))"' export
 
@@ -328,7 +353,7 @@ cmp -s pipeline/50_export.sql "$TMP/export_moved.sql" \
   && die "sed-mönstret matchade inte längre — COPY-målet i 50_export.sql har bytt form"
 
 guard "export paths as shipped"         pass "$SRC_JSON"         pipeline/50_export.sql
-guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "utanför"
+guard "one COPY target redirected"      fail "$SRC_JSON"         "$TMP/export_moved.sql"      "nagon/annan/retail.json"
 guard "out_dir moved, export unchanged" fail "$ROOT/nagon/annan" pipeline/50_export.sql       "nagon/annan/"
 guard "export sql does not exist"       fail "$SRC_JSON"         "$TMP/ingen_sadan_fil.sql"   "finns inte"
 

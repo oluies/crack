@@ -7,6 +7,37 @@
 -- Each check raises with a message naming what broke. .bail on (set by run.sh)
 -- stops at the first failure, so the message you see is the one that matters.
 
+-- ---------------------------------------------------------------------------
+-- VARNING, gäller varje kontroll i den här filen och i 60_verify_export.sql.
+--
+-- format() ger NULL om NÅGOT argument är NULL, och error(NULL) KASTAR INTE —
+-- den returnerar NULL och körningen fortsätter grön. En kontroll vars
+-- meddelande interpolerar ett värde som kan vara NULL är alltså tyst i precis
+-- det värsta fallet: en tom tabell. Upptäckt när check 14 vägrade fälla på en
+-- serie utan observationer i fönstret, där expected var NULL.
+--
+-- Samma sak gäller VILLKORET, inte bara meddelandet: NULL > 21 är NULL, och
+-- CASE faller igenom till grönt. Därför kommer check 1b först av allt.
+--
+-- Kontroll 1–6 interpolerar avsiktligt utan coalesce. Deras uttryck kan inte
+-- vara NULL när count(*) > 0: nycklarna kommer från kolumner som filtreras
+-- non-null redan i staging (10_eia.sql och 20_oilbulletin.sql), och min/max
+-- över en icke-tom mängd är non-null. Det är ett antagande om de filtren, inte
+-- en egenskap hos format() — flyttas ett filter måste de coalesce:as.
+-- ---------------------------------------------------------------------------
+
+-- 1b. Veckoaxeln finns över huvud taget.
+--
+--     Först, för att allt nedanför vilar på den. En tom stg.week_calendar gör
+--     inte bara meddelanden NULL utan villkoren också: check 1 räknar luckor
+--     över noll rader, check 6 kryssjoinar en tom kalender till noll rader, och
+--     staleness-uttrycket blir NULL - DATE '1900-01-01' > 21, alltså NULL. Ett
+--     DELETE FROM stg.week_calendar passerade hela verify.sql grönt — ett värre
+--     tillstånd än den tomma crack_weekly som redan har ett prov.
+SELECT CASE WHEN (SELECT count(*) FROM stg.week_calendar) = 0
+  THEN error('verify 1b: stg.week_calendar is empty - every check below it is vacuous')
+END AS "1b week calendar is not empty";
+
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every
 --    positional values[] array in the published JSON against every other.
 SELECT CASE WHEN count(*) > 0
@@ -111,14 +142,6 @@ FROM (
   LEFT JOIN stg.fx_weekly f ON f.week_start = w.week_start AND f.ccy = c.ccy
   WHERE f.per_eur IS NULL
 );
-
--- VARNING, gäller varje kontroll i den här filen: format() ger NULL om NÅGOT
---     argument är NULL, och error(NULL) KASTAR INTE — den returnerar NULL och
---     körningen fortsätter grön. Ett meddelande som interpolerar ett värde som
---     kan vara NULL gör alltså kontrollen tyst i precis det värsta fallet: en
---     tom tabell. Därför är varje interpolerat uttryck nedan coalesce:at till
---     text. Upptäckt när check 14 vägrade fälla på en serie utan observationer,
---     där expected var NULL.
 
 -- 7. No long trailing run of empty weeks. The calendar ends at the last complete
 --    week, but if a source has stalled we would publish a flat blank tail and

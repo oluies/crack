@@ -29,7 +29,14 @@ SELECT coalesce(getvariable('strict')::BOOLEAN, true) AS strict,
        -- rapportera två invarianter gröna som inte kan fälla.
        CASE WHEN getvariable('min_week_obs') IS NULL
             THEN error('min_week_obs är inte satt — se preamblen i pipeline/run.sh')
-            ELSE getvariable('min_week_obs')::INTEGER END AS min_week_obs;
+            ELSE getvariable('min_week_obs')::INTEGER END AS min_week_obs,
+       -- Byggdagen, fryst. 25_calendar.sql sätter axelns gräns utifrån den och
+       -- verify 1e kontrollerar gränsen mot samma värde, så de två kan inte
+       -- glida isär. Läses inte ur current_date vid kontrolltillfället:
+       -- --verify-only kör invarianterna mot en databas som byggdes en annan
+       -- dag, och då hade 1e fällt en helt korrekt axel för att kalendern hunnit
+       -- vidare. Färskhet mäts av check 7/16, som är till för just det.
+       current_date AS built_on;
 
 -- Veckoaxeln byggs INTE här. Dess övre gräns beror på vad källorna faktiskt
 -- publicerat, och de är inte inlästa förrän 10/15/20 har körts — se

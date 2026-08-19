@@ -67,6 +67,11 @@ the last daily observation; each chart states its own coverage.
   surveyed week while the crack series ends one to two weeks earlier. Printing
   the axis as coverage would promise data that is not there — the exact
   confusion 003 was raised to fix, reintroduced in the caption.
+- **`--verify-only` runs on a different day than the build.** Checking the axis
+  against `current_date` would fail a perfectly correct axis as soon as the
+  calendar moved on a week — the same class of false failure that got an earlier
+  freshness check reverted entirely in feature 001. The bound and its check both
+  read `stg.build_meta.built_on`.
 - **A bad upstream date must not move the axis.** The bound now depends on
   source data, so a corrupt week could push the axis into the future. Capped at
   the current week and floored at the last complete week; `verify 1e` asserts
@@ -93,6 +98,10 @@ the last daily observation; each chart states its own coverage.
 - **FR-306**: Each chart MUST state the coverage of **its own** series, which may
   differ from the axis and from the other charts.
 - **FR-307**: The header stamp MUST be empty when the data has not loaded.
+- **FR-308**: The build date MUST be recorded at build time and used both to set
+  the axis bound and to check it, so `--verify-only` against an older database
+  judges the axis by the day it was built rather than by today. Data staleness is
+  a separate question with its own checks (7, 7b, 16).
 
 ## Out of scope
 

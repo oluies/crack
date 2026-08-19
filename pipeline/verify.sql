@@ -58,8 +58,9 @@ END AS "1c daily axis is not empty";
 --     tas bort: n >= NULL är NULL, check 13 och 14 får tomma mängder och
 --     rapporterar grönt. strict är av samma skäl coalesce:ad på sina två
 --     läsplatser; det här är den andra kolumnen i samma tabell.
-SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta WHERE min_week_obs IS NOT NULL) <> 1
-  THEN error('verify 1d: stg.build_meta has no usable min_week_obs - checks 13 and 14 are vacuous')
+SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta
+                   WHERE min_week_obs IS NOT NULL AND built_on IS NOT NULL) <> 1
+  THEN error('verify 1d: stg.build_meta has no usable min_week_obs/built_on - checks 1e, 13 and 14 are vacuous')
 END AS "1d build_meta usable";
 
 -- 1e. Axelns övre gräns ligger i rätt intervall.
@@ -69,16 +70,22 @@ END AS "1d build_meta usable";
 --     som inte var det förut: ett trasigt datum uppströms kan skjuta axeln in i
 --     framtiden, och en tom enkättabell kan låta den falla under den sista
 --     avslutade veckan. Båda ger en axel som ser normal ut.
+--     Gränserna prövas mot stg.build_meta.built_on, inte mot current_date:
+--     --verify-only kör de här invarianterna mot en databas som byggdes en
+--     annan dag, och mot dagens datum hade en helt korrekt axel fällts så fort
+--     kalendern hunnit vidare en vecka. Att datan är gammal är en annan fråga
+--     och har egna kontroller (7, 7b, 16).
 SELECT CASE
-  WHEN (SELECT max(week_start) FROM stg.week_calendar) > date_trunc('week', current_date)::DATE
-    THEN error(format('verify 1e: the week axis runs into the future - ends {}, current week {}',
-                      coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
-                      date_trunc('week', current_date)::DATE::VARCHAR))
   WHEN (SELECT max(week_start) FROM stg.week_calendar)
-       < (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE
+       > date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE
+    THEN error(format('verify 1e: the week axis runs into the future - ends {}, build week {}',
+                      coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                      coalesce(date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE::VARCHAR, 'none')))
+  WHEN (SELECT max(week_start) FROM stg.week_calendar)
+       < (date_trunc('week', (SELECT built_on FROM stg.build_meta)) - INTERVAL 7 DAY)::DATE
     THEN error(format('verify 1e: the week axis stops before the last complete week - ends {}, expected at least {}',
                       coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
-                      (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE::VARCHAR))
+                      coalesce((date_trunc('week', (SELECT built_on FROM stg.build_meta)) - INTERVAL 7 DAY)::DATE::VARCHAR, 'none')))
 END AS "1e week axis ends in range";
 
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every

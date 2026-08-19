@@ -194,11 +194,23 @@ expect_fail "daily axis emptied entirely" "verify 1c" \
 # enkätvecka kan dra ut den, alltså ett nytt felläge som behöver ett nytt prov.
 expect_fail "week axis pushed into the future" "verify 1e" \
   "INSERT INTO stg.week_calendar
-   SELECT (date_trunc('week', current_date) + INTERVAL 7 DAY)::DATE;" verify
+   SELECT (date_trunc('week', (SELECT built_on FROM stg.build_meta)) + INTERVAL 7 DAY)::DATE;" verify
 
 expect_fail "week axis stops short of the last complete week" "verify 1e" \
   "DELETE FROM stg.week_calendar
-    WHERE week_start >= (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE;" verify
+    WHERE week_start >= (date_trunc('week', (SELECT built_on FROM stg.build_meta))
+                         - INTERVAL 7 DAY)::DATE;" verify
+
+# --verify-only kör mot en databas som byggdes en annan dag. Axeln OCH byggdagen
+# flyttas därför tre veckor bakåt tillsammans: inbördes är de konsekventa, så
+# 1e ska tiga. Läste den current_date i stället hade samma korruption fällt —
+# det är just den skillnaden provet finns för att fånga, och 21 dagar är jämna
+# tre veckor så måndagsjusteringen bevaras.
+expect_pass "an axis built three weeks ago still verifies" \
+  "CREATE OR REPLACE TEMP TABLE cut AS
+     SELECT (max(week_start) - INTERVAL 21 DAY)::DATE AS d FROM stg.week_calendar;
+   DELETE FROM stg.week_calendar WHERE week_start > (SELECT d FROM cut);
+   UPDATE stg.build_meta SET built_on = (built_on - INTERVAL 21 DAY)::DATE;" verify
 
 expect_fail "week calendar gap" "verify 1" \
   "DELETE FROM stg.week_calendar WHERE week_start = DATE '2023-06-05';" verify

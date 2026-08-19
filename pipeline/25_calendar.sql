@@ -1,5 +1,8 @@
 -- 25_calendar.sql — the shared week axis.
 --
+-- "Idag" läses ur stg.build_meta.built_on, inte ur current_date, så att axeln
+-- och kontrollen av den (verify 1e) refererar ett och samma värde.
+--
 -- Lives here rather than in 00_schema.sql because its upper bound depends on what
 -- the sources actually published, and they are not parsed until 10/15/20. Runs
 -- before 30_ecb.sql, which is the first script to join against it.
@@ -41,10 +44,10 @@ bounds AS (
   SELECT
     getvariable('start_week')::DATE AS lo,
     greatest(
-      (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE,
+      (date_trunc('week', (SELECT built_on FROM stg.build_meta)) - INTERVAL 7 DAY)::DATE,
       least(
         coalesce((SELECT wk FROM surveyed), DATE '1900-01-01'),
-        date_trunc('week', current_date)::DATE
+        date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE
       )
     ) AS hi
 )

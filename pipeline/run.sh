@@ -9,6 +9,9 @@
 #   pipeline/run.sh --offline       reuse data/work/, no network
 #   pipeline/run.sh --fixtures      build from data/fixtures/, no API key needed
 #   pipeline/run.sh --verify-only   re-run the invariants against the existing db
+#                                   (after --fixtures the database and the
+#                                   published files come from different runs, so
+#                                   only the database invariants are re-run)
 #
 # Requires: duckdb 1.5+, curl. EIA_API_KEY from the environment or .env.
 
@@ -148,15 +151,24 @@ SQL
 if [ "$MODE" = "verify" ]; then
   # Egen skriptfil så att negative.sh kan bevisa att den både fäller och håller
   # tyst — se check-build-pairing.sh för varför paret kan hamna i otakt.
-  # "|| exit 1", inte "|| die": guarden skriver redan sin egen diagnos, och en
-  # extra FEL-rad utan innehåll vore två diagnoser för ett fel — just det
-  # skriptet självt säger att det finns för att undvika. Men statusen görs
-  # explicit ändå: set -e ensamt är positionellt, och samma anrop flyttat in i
-  # ett if, ett &&, ett ! eller en pipeline blir tyst rådgivande.
-  pipeline/check-build-pairing.sh "$DB" "$OUT_DIR" || exit 1
-  say "kör invarianter"
-  duckdb "$DB" -f "$WORK/preamble.sql" \
-    -f pipeline/verify.sql -f pipeline/60_verify_export.sql
+  # Bara 60_verify_export.sql jämför databasen med det publicerade trädet.
+  # verify.sql:s invarianter gäller databasen i sig och är fullt giltiga mot ett
+  # fixtures-bygge — att vägra dem också vore att blockera för mycket.
+  #
+  # Och att vägra allt vore att stänga --verify-only helt för den som saknar
+  # EIA-nyckel: run.sh återställer site/public/data vid varje fixtures-bygge, så
+  # paret är i otakt om och om igen, och botemedlet guarden nämner (kör om
+  # bygget) kräver just den nyckeln. Det gäller alla som nyss kört negative.sh,
+  # som förutsätter ett fixtures-bygge.
+  if pipeline/check-build-pairing.sh "$DB" "$OUT_DIR"; then
+    say "kör invarianter"
+    duckdb "$DB" -f "$WORK/preamble.sql" \
+      -f pipeline/verify.sql -f pipeline/60_verify_export.sql
+    exit $?
+  fi
+  say "hoppar över export-invarianterna — de skulle jämföra den här databasen med"
+  say "filer den inte skrev. Databasens egna invarianter körs ändå."
+  duckdb "$DB" -f "$WORK/preamble.sql" -f pipeline/verify.sql
   exit $?
 fi
 

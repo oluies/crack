@@ -576,9 +576,10 @@ else
   printf 'FAIL  %-44s should have stayed green\n' "no cracks.json to compare"; fail=$((fail+1))
 fi
 
-# De två tysta grenarna. Bägge lämnar diagnosen till export-check 8, och utan
-# prov skulle en regression som tog bort valid()-grinden få guarden att fälla på
-# ett fel som inte är dess — två diagnoser för ett fel.
+# De tysta grenarna: ostämplad fil, ingen databas, databas utan build_meta. Alla
+# lämnar diagnosen till export-check 8, och utan prov skulle en regression som
+# tog bort valid()-grinden få guarden att fälla på ett fel som inte är dess —
+# två diagnoser för ett fel.
 reset_copy
 python3 -c "
 import json
@@ -599,7 +600,7 @@ else
 fi
 
 reset_copy
-# Tredje tysta grenen: filen finns men stg.build_meta går inte att läsa.
+# Filen finns men stg.build_meta går inte att läsa.
 duckdb "$TMP/tom.duckdb" -c "SELECT 1" >/dev/null 2>&1 || die "kunde inte skapa en tom databas"
 if pipeline/check-build-pairing.sh "$TMP/tom.duckdb" "$TMP/data" >/dev/null 2>&1; then
   printf 'ok    %-44s -> stays green\n' "database without build_meta"; pass=$((pass+1))

@@ -68,7 +68,7 @@ COPY (
   SELECT
     {
       'generated': getvariable('generated'),
-      'synthetic': NOT getvariable('strict')::BOOLEAN,
+      'synthetic': NOT (SELECT strict FROM stg.build_meta),
       'sources': [
         {'name':    'EIA Open Data v2',
          'url':     'https://www.eia.gov/opendata/',
@@ -147,7 +147,7 @@ COPY (
   SELECT
     {
       'generated': getvariable('generated'),
-      'synthetic': NOT getvariable('strict')::BOOLEAN,
+      'synthetic': NOT (SELECT strict FROM stg.build_meta),
       'sources': [
         {'name':    'EIA Open Data v2',
          'url':     'https://www.eia.gov/opendata/',
@@ -228,7 +228,7 @@ COPY (
   SELECT
     {
       'generated': getvariable('generated'),
-      'synthetic': NOT getvariable('strict')::BOOLEAN,
+      'synthetic': NOT (SELECT strict FROM stg.build_meta),
       'sources': [
         {'name':    'EU Weekly Oil Bulletin',
          'url':     'https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en',
@@ -253,7 +253,7 @@ COPY (
   SELECT
     {
       'generated': getvariable('generated'),
-      'synthetic': NOT getvariable('strict')::BOOLEAN,
+      'synthetic': NOT (SELECT strict FROM stg.build_meta),
       'sources': [
         {'name':    'ECB SDMX reference rates',
          'url':     'https://data.ecb.europa.eu/',
@@ -304,7 +304,7 @@ COPY (
   SELECT
     {
       'generated': getvariable('generated'),
-      'synthetic': NOT getvariable('strict')::BOOLEAN,
+      'synthetic': NOT (SELECT strict FROM stg.build_meta),
       'sources': [
         {'name':    'EIA Open Data v2',
          'url':     'https://www.eia.gov/opendata/',

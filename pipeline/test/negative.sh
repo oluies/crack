@@ -355,6 +355,16 @@ expect_fail "fx.json rates.USD null" "verify 8" \
 expect_fail "retail.json series lose values" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"retail.json\"));[s.pop(\"values\") for s in d[\"series\"]];json.dump(d,open(\"retail.json\",\"w\"))"' export
 
+# meta.synthetic måste vara ett BOOLEAN. Innan exporten läste det coalesce:ade
+# värdet ur stg.build_meta kunde en osatt strict-variabel ge "synthetic": null i
+# varje publicerad fil — och ci.yml letar efter "synthetic":true, så ett null
+# hade glidit rakt igenom det skydd stämpeln finns för.
+expect_fail "meta.synthetic is null, not a boolean" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"cracks.json\"));d[\"meta\"][\"synthetic\"]=None;json.dump(d,open(\"cracks.json\",\"w\"))"' export
+
+expect_fail "meta.synthetic missing entirely" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"retail.json\"));del d[\"meta\"][\"synthetic\"];json.dump(d,open(\"retail.json\",\"w\"))"' export
+
 expect_fail "cracks.json series emptied" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"cracks.json\"));d[\"series\"]=[];json.dump(d,open(\"cracks.json\",\"w\"))"' export
 

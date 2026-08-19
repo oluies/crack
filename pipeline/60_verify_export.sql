@@ -55,6 +55,12 @@ FROM (
       WHEN f <> 'cracks_daily.json'
            AND json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
+      -- Måste vara ett BOOLEAN, inte bara närvarande. meta.synthetic är hela
+      -- skyddet mot att publicera fixtures-data, och ci.yml letar efter
+      -- "synthetic":true — ett null hade alltså glidit förbi tyst, vilket är
+      -- precis det utfallet stämpeln finns för att omöjliggöra.
+      WHEN json_type(json->'$.meta.synthetic') IS DISTINCT FROM 'BOOLEAN'
+        THEN 'meta.synthetic is not a boolean'
       WHEN f = 'usregions.json' AND (json_type(json->'$.regions') IS DISTINCT FROM 'ARRAY'
                                   OR json_array_length(json->'$.regions') = 0
                                   OR json_type(json->'$.regions[0].values') IS DISTINCT FROM 'ARRAY')

@@ -17,11 +17,16 @@
 --
 --   grep -rE "getvariable|build_meta" pipeline/
 --
--- min_week_obs is read downstream only OUT OF stg.build_meta, never through
--- getvariable(), so grepping for getvariable alone makes it look unused. strict
--- appears both ways, and legitimately: 50_export.sql reads the variable because
--- it runs at build time, while verify.sql reads the table because it must also
--- survive --verify-only, which has no preamble.
+-- Både strict och min_week_obs läses downstream OUT OF stg.build_meta, aldrig
+-- genom getvariable(), så en grep efter getvariable ensam får dem att se
+-- oanvända ut.
+--
+-- Att läsa dem här och inte ur variabeln är inte stilistiskt. --verify-only
+-- kör mot en databas ett tidigare anrop byggde, men skriver en FÄRSK preambel
+-- där strict alltid är true (run.sh: STRICT sätts till false bara i
+-- fixtures-grenen). Ett omverifierat fixtures-bygge skulle alltså bedömas
+-- strikt mot en fryst ögonblicksbild. Tabellen minns vad som gällde när datan
+-- byggdes; variabeln beskriver bara det här anropet.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

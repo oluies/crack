@@ -163,6 +163,7 @@ duckdb "$DB" \
   -f pipeline/10_eia.sql \
   -f pipeline/15_eia_regions.sql \
   -f pipeline/20_oilbulletin.sql \
+  -f pipeline/25_calendar.sql \
   -f pipeline/30_ecb.sql \
   -f pipeline/40_cracks.sql \
   -f pipeline/verify.sql \

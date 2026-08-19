@@ -190,6 +190,16 @@ schema_guard "00_schema with min_week_obs"    med  ""
 expect_fail "daily axis emptied entirely" "verify 1c" \
   "DELETE FROM stg.day_axis;" verify
 
+# Axeln får inte sträcka sig in i framtiden — möjligt först sedan en publicerad
+# enkätvecka kan dra ut den, alltså ett nytt felläge som behöver ett nytt prov.
+expect_fail "week axis pushed into the future" "verify 1e" \
+  "INSERT INTO stg.week_calendar
+   SELECT (date_trunc('week', current_date) + INTERVAL 7 DAY)::DATE;" verify
+
+expect_fail "week axis stops short of the last complete week" "verify 1e" \
+  "DELETE FROM stg.week_calendar
+    WHERE week_start >= (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE;" verify
+
 expect_fail "week calendar gap" "verify 1" \
   "DELETE FROM stg.week_calendar WHERE week_start = DATE '2023-06-05';" verify
 

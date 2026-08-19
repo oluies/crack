@@ -62,6 +62,25 @@ SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta WHERE min_week_obs IS NOT 
   THEN error('verify 1d: stg.build_meta has no usable min_week_obs - checks 13 and 14 are vacuous')
 END AS "1d build_meta usable";
 
+-- 1e. Axelns övre gräns ligger i rätt intervall.
+--
+--     Sedan 25_calendar.sql låter en publicerad enkätvecka dra ut axeln beror
+--     gränsen på uppströmsdata, inte bara på klockan. Två fel blir då möjliga
+--     som inte var det förut: ett trasigt datum uppströms kan skjuta axeln in i
+--     framtiden, och en tom enkättabell kan låta den falla under den sista
+--     avslutade veckan. Båda ger en axel som ser normal ut.
+SELECT CASE
+  WHEN (SELECT max(week_start) FROM stg.week_calendar) > date_trunc('week', current_date)::DATE
+    THEN error(format('verify 1e: the week axis runs into the future - ends {}, current week {}',
+                      coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                      date_trunc('week', current_date)::DATE::VARCHAR))
+  WHEN (SELECT max(week_start) FROM stg.week_calendar)
+       < (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE
+    THEN error(format('verify 1e: the week axis stops before the last complete week - ends {}, expected at least {}',
+                      coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                      (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE::VARCHAR))
+END AS "1e week axis ends in range";
+
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every
 --    positional values[] array in the published JSON against every other.
 SELECT CASE WHEN count(*) > 0

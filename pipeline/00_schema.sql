@@ -31,23 +31,10 @@ SELECT coalesce(getvariable('strict')::BOOLEAN, true) AS strict,
             THEN error('min_week_obs är inte satt — se preamblen i pipeline/run.sh')
             ELSE getvariable('min_week_obs')::INTEGER END AS min_week_obs;
 
--- ---------------------------------------------------------------------------
--- Week axis
---
--- Every published series is left-joined onto this, so all charts share one axis
--- and a missing observation stays visible as a gap. date_trunc('week') is ISO in
--- DuckDB — Monday-based — which is what the sources publish against.
---
--- The upper bound is the last COMPLETE week. Today's week is still accumulating;
--- including it would render a two-day average as a dip. Excluded here, once,
--- rather than in every downstream script.
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE stg.week_calendar AS
-SELECT UNNEST(generate_series(
-         getvariable('start_week')::DATE,
-         (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE,
-         INTERVAL 7 DAY
-       ))::DATE AS week_start;
+-- Veckoaxeln byggs INTE här. Dess övre gräns beror på vad källorna faktiskt
+-- publicerat, och de är inte inlästa förrän 10/15/20 har körts — se
+-- pipeline/25_calendar.sql. Att den låg här och bara läste current_date var
+-- skälet till att en publicerad retailvecka kunde kastas i upp till sju dagar.
 
 -- ---------------------------------------------------------------------------
 -- EU-27

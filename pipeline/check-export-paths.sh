@@ -17,10 +17,10 @@ set -euo pipefail
 
 ROOT="$1"; OUT_DIR="$2"; EXPORT_SQL="$3"
 
-# Egen diagnos: utan detta blir en felstavad sökväg tre misslyckade grep och
-# meddelandet "skriver inte till ..." — vilket pekar på filens innehåll i
-# stället för på att filen inte finns.
-[ -f "$EXPORT_SQL" ] || { echo "FEL: $EXPORT_SQL finns inte" >&2; exit 1; }
+# Ingen egen filkontroll här: export-targets.sh vägrar redan en saknad fil med
+# den diagnosen innan någon grep körs. En andra, ordagrant likadan kopia hade
+# behövt hållas i synk för hand — precis den drift som fick utvinningen att
+# flytta till ett delat skript.
 
 # COPY ... TO paths are relative to the process CWD, which run.sh sets to the
 # repo root; out_dir is absolute. Compare them in the same terms.

@@ -290,9 +290,11 @@ expect_fail "an MA7 point dropped entirely" "verify 14" \
 expect_fail "an orphan MA7 point with no daily row" "verify 14" \
   "INSERT INTO stg.crack_daily_ma VALUES (DATE '1999-01-04', 'us_ulsd_brent', NULL);" verify
 
-# Kvar som eget prov, men rätt märkt: det är den tunna fönster-klausulen.
-expect_fail "MA7 value on a date with no daily row" "verify 14" \
-  "INSERT INTO stg.crack_daily_ma VALUES (DATE '1999-01-04', 'us_ulsd_brent', 42.0);" verify
+# Ett andra prov med ett VÄRDE på samma datum vore meningslöst: varje datum utan
+# dagsrad är per definition orphan, så orphan-termen fäller det först och provet
+# hade varit grönt även med den tunna fönster-klausulen borttagen. Den klausulen
+# prövas i stället av "MA7 emitted where the window is too thin" nedan, som
+# ligger på seriens första dag — den finns i crack_daily, alltså orphan = false.
 
 expect_fail "a day appears twice on the daily axis" "verify 15" \
   "INSERT INTO stg.day_axis SELECT min(obs_date) FROM stg.day_axis;" verify

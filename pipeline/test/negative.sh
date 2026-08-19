@@ -532,6 +532,50 @@ guard "export sql does not exist"       fail "$SRC_JSON"         "$TMP/ingen_sad
 printf -- "-- inga COPY-mål alls\n" > "$TMP/export_tom.sql"
 guard "export sql has no COPY targets" fail "$SRC_JSON"         "$TMP/export_tom.sql"        "inga COPY"
 
+# --- databas/fil-paret ---------------------------------------------------------
+#
+# check-build-pairing.sh är skal, inte SQL, av samma skäl som
+# check-export-paths.sh: en guard inne i run.sh kan bara nås genom att köra hela
+# pipelinen, och en oprövad guard är hur de tröga kontrollerna kom in.
+
+pairing() {  # $1 = namn, $2 = "fail"|"pass", $3 = stämpel i filerna, $4 = text
+  local name="$1" want="$2" stamp="$3" want_msg="${4:-}" out rc
+  [ "$want" != "fail" ] || [ -n "$want_msg" ] \
+    || die "pairing '$name': förväntat felmeddelande saknas"
+
+  reset_copy
+  python3 "$TMP/stamp.py" "$TMP/data" "$stamp" || die "pairing '$name': kunde inte stämpla"
+
+  out=$(pipeline/check-build-pairing.sh "$TMP/t.duckdb" "$TMP/data" 2>&1); rc=$?
+
+  if [ "$want" = "pass" ]; then
+    if [ $rc -eq 0 ]; then printf 'ok    %-44s -> stays green\n' "$name"; pass=$((pass+1))
+    else printf 'FAIL  %-44s should have stayed green: %s\n' "$name" "$(printf '%s' "$out" | head -1)"
+         fail=$((fail+1)); fi
+  elif [ $rc -eq 0 ]; then
+    printf 'FAIL  %-44s did not fail at all\n' "$name"; fail=$((fail+1))
+  elif ! printf '%s' "$out" | grep -qF "$want_msg"; then
+    printf 'FAIL  %-44s failed, but not with "%s"\n      got: %s\n' \
+      "$name" "$want_msg" "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
+  else
+    printf 'ok    %-44s -> %s\n' "$name" "$want_msg"; pass=$((pass+1))
+  fi
+}
+
+# $SYNTHETIC är databasens egen polaritet, så den stämpeln hör ihop med den.
+pairing "db and files from the same run" pass "$SYNTHETIC"
+# ... och den motsatta gör det inte. Det är läget efter --fixtures.
+if [ "$SYNTHETIC" = "true" ]; then OTHER=false; else OTHER=true; fi
+pairing "db and files from different runs" fail "$OTHER" "samma körning"
+
+# Saknad fil är export-check 8:s ärende. Två diagnoser för ett fel är värre än en.
+rm -rf "$TMP/empty"; mkdir -p "$TMP/empty"
+if pipeline/check-build-pairing.sh "$TMP/t.duckdb" "$TMP/empty" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "no cracks.json to compare"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "no cracks.json to compare"; fail=$((fail+1))
+fi
+
 # --- the fetch retry logic ---------------------------------------------------
 #
 # The argument for the guard above applies to the retry too: the properties this

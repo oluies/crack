@@ -42,6 +42,7 @@ die() { echo "FEL: $*" >&2; exit 2; }
 [ -f "$SRC_JSON/retail.json" ] || die "$SRC_JSON/retail.json saknas"
 [ -f "$SRC_JSON/fx.json" ]     || die "$SRC_JSON/fx.json saknas"
 [ -f "$SRC_JSON/cracks_daily.json" ] || die "$SRC_JSON/cracks_daily.json saknas"
+[ -f "$SRC_JSON/usregions.json" ]    || die "$SRC_JSON/usregions.json saknas"
 command -v python3 >/dev/null  || die "python3 krävs för JSON-korruptionerna"
 command -v duckdb  >/dev/null  || die "duckdb krävs"
 
@@ -143,6 +144,9 @@ echo "negativa prov — varje invariant måste kunna fälla:"
 # meddelandena, blir NULL när axeln är borta.
 expect_fail "week calendar emptied entirely" "verify 1b" \
   "DELETE FROM stg.week_calendar;" verify
+
+expect_fail "daily axis emptied entirely" "verify 1c" \
+  "DELETE FROM stg.day_axis;" verify
 
 expect_fail "week calendar gap" "verify 1" \
   "DELETE FROM stg.week_calendar WHERE week_start = DATE '2023-06-05';" verify
@@ -294,6 +298,15 @@ expect_fail "daily file grows a weeks axis" "verify 8" \
 # serie. Korruptionen gör bägge sakerna, annars finns inget fel att rapportera.
 expect_fail "cracks.json: non-first series loses its key" "verify 9" \
   '!python3 -c "import json;d=json.load(open(\"cracks.json\"));s=d[\"series\"][1];s.pop(\"key\");s[\"values\"]=s[\"values\"][:50];json.dump(d,open(\"cracks.json\",\"w\"))"' export
+
+# Bägge egenskaperna samtidigt, inte en i taget: en TOM serie UTAN nyckel är
+# det enda fallet där undantaget självt blir NULL och raden försvinner ur
+# WHERE. De två proven ovan avkortar till 50 och går därför runt kombinationen.
+expect_fail "cracks.json: empty series with no key" "verify 9" \
+  '!python3 -c "import json;d=json.load(open(\"cracks.json\"));s=d[\"series\"][1];s.pop(\"key\");s[\"values\"]=[];json.dump(d,open(\"cracks.json\",\"w\"))"' export
+
+expect_fail "cracks_daily.json: empty series with no key" "verify 17" \
+  '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));s=d[\"series\"][1];s.pop(\"key\");s[\"values\"]=[];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
 
 expect_fail "cracks_daily.json: non-first series loses its key" "verify 17" \
   '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));s=d[\"series\"][1];s.pop(\"key\");s[\"values\"]=s[\"values\"][:50];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export

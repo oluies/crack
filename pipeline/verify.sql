@@ -38,6 +38,17 @@ SELECT CASE WHEN (SELECT count(*) FROM stg.week_calendar) = 0
   THEN error('verify 1b: stg.week_calendar is empty - every check below it is vacuous')
 END AS "1b week calendar is not empty";
 
+-- 1c. Samma sak för dagsaxeln.
+--
+--     En tom stg.day_axis gör check 15 tom (noll grupper har count > 1) och
+--     check 14 tom (recomputed har noll rader), och check 16 är grindad på
+--     strict — ett fixtures-bygge med tom dagsaxel passerade alltså hela
+--     verify.sql. Export-check 8/18a tar den, men först efter att filen
+--     skrivits.
+SELECT CASE WHEN (SELECT count(*) FROM stg.day_axis) = 0
+  THEN error('verify 1c: stg.day_axis is empty - checks 14, 15 and 16 are vacuous')
+END AS "1c daily axis is not empty";
+
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every
 --    positional values[] array in the published JSON against every other.
 SELECT CASE WHEN count(*) > 0
@@ -204,12 +215,12 @@ thin AS (
   FROM published p
   LEFT JOIN coverage c USING (week_start, series_id)
   WHERE p.value IS NOT NULL
-    AND coalesce(c.n, 0) < getvariable('min_week_obs')
+    AND coalesce(c.n, 0) < (SELECT min_week_obs FROM stg.build_meta)
 )
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 13: {} published weekly leg(s) rest on fewer than {} daily '
                     'observations (first: {} {}, {} obs) - a partial week must publish as NULL',
-                    count(*), getvariable('min_week_obs'),
+                    count(*), (SELECT min_week_obs FROM stg.build_meta),
                     coalesce(min(week_start)::VARCHAR, 'none'),
                     coalesce((SELECT series_id FROM thin ORDER BY week_start, series_id LIMIT 1), 'none'),
                     coalesce((SELECT n FROM thin ORDER BY week_start, series_id LIMIT 1)::VARCHAR, 'none')))
@@ -239,9 +250,9 @@ WITH recomputed AS (
 ),
 bad AS (
   SELECT * FROM recomputed
-  WHERE (n >= getvariable('min_week_obs')
+  WHERE (n >= (SELECT min_week_obs FROM stg.build_meta)
          AND (published IS NULL OR abs(published - expected) > 1e-9))
-     OR (n <  getvariable('min_week_obs') AND published IS NOT NULL)
+     OR (n <  (SELECT min_week_obs FROM stg.build_meta) AND published IS NOT NULL)
 )
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 14: {} of {} MA7 point(s) do not equal the trailing 7-day mean '

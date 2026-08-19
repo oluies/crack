@@ -164,7 +164,7 @@ COPY (
         'nwe_gasoil_brent': 'ICE gasoil USD/t / 7.45 - Brent USD/bbl',
         'ma7':              'Unweighted mean of the daily values over the trailing 7 '
                             'calendar days, inclusive. Emitted only where the window holds '
-                            'at least ' || getvariable('min_week_obs')::VARCHAR || ' observations.'
+                            'at least ' || (SELECT min_week_obs FROM stg.build_meta)::VARCHAR || ' observations.'
       },
       'note': 'One point per EIA observation date, so weekends are absent rather than null. '
               'This axis is NOT positionally comparable with the weekly files. EIA publishes '

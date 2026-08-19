@@ -36,7 +36,7 @@ CREATE OR REPLACE TABLE stg.legs_weekly AS
 WITH weekly AS (
   SELECT week_start, series_id, value
   FROM stg.legs_weekly_cov
-  WHERE n_obs >= getvariable('min_week_obs')
+  WHERE n_obs >= (SELECT min_week_obs FROM stg.build_meta)
 )
 SELECT
   c.week_start,
@@ -174,7 +174,7 @@ CREATE OR REPLACE TABLE stg.crack_daily_ma AS
 SELECT
   obs_date,
   series_key,
-  CASE WHEN count(usd_per_bbl) OVER w >= getvariable('min_week_obs')
+  CASE WHEN count(usd_per_bbl) OVER w >= (SELECT min_week_obs FROM stg.build_meta)
        THEN AVG(usd_per_bbl) OVER w END AS usd_per_bbl
 FROM stg.crack_daily
 WINDOW w AS (

@@ -108,7 +108,11 @@ FROM (
   SELECT s.key AS key, len(s.values) AS n, len(weeks) AS w
   FROM (SELECT weeks, unnest(series) AS s FROM read_json(getvariable('out_dir') || '/cracks.json'))
 ) WHERE n IS NULL
-     OR (n IS DISTINCT FROM w AND NOT (n = 0 AND key = 'nwe_gasoil_brent'));
+     -- coalesce på key: med key = NULL blir NOT (0 = 0 AND NULL = '...') lika
+     -- med NULL, hela WHERE-uttrycket NULL, och raden väljs inte alls. En serie
+     -- som BÅDE tappat sin nyckel OCH är tom hade då seglat igenom — check 8
+     -- sonderar bara series[0] och ser den inte heller.
+     OR (n IS DISTINCT FROM w AND NOT (n = 0 AND coalesce(key, '') = 'nwe_gasoil_brent'));
 
 -- Exemplen kapas: en misslyckad axel gör alla 110 serier felaktiga, och en
 -- CI-logg med 110 namn i döljer felet i stället för att visa det.
@@ -190,7 +194,7 @@ FROM (
   FROM (SELECT days, unnest(series) AS s FROM read_json(getvariable('out_dir') || '/cracks_daily.json'))
 ) WHERE n IS NULL
      OR (n IS DISTINCT FROM w
-         AND NOT (n = 0 AND key IN ('nwe_gasoil_brent', 'nwe_gasoil_brent_ma7')));
+         AND NOT (n = 0 AND coalesce(key, '') IN ('nwe_gasoil_brent', 'nwe_gasoil_brent_ma7')));
 
 -- 18. Dagsaxeln är stigande, unik och icke-tom.
 --

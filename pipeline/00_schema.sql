@@ -19,7 +19,17 @@ CREATE OR REPLACE TABLE stg.build_meta AS
 -- coalesce to true: an unset variable yields NULL, and `CASE WHEN NULL AND ...`
 -- is NULL, which reports green. The default has to be "do check it" — this is
 -- the same fail-open-on-NULL class the export checks close with IS DISTINCT FROM.
-SELECT coalesce(getvariable('strict')::BOOLEAN, true) AS strict;
+SELECT coalesce(getvariable('strict')::BOOLEAN, true) AS strict,
+       -- min_week_obs har ingen säker default. Ett för högt värde tömmer
+       -- veckoserien, ett för lågt återinför det fel hela feature 003 finns för
+       -- — och NULL gör check 13 och 14 tysta, eftersom n >= NULL är NULL och
+       -- CASE faller igenom till grönt. Alltså: dö högljutt i stället för att
+       -- gissa. Läses härifrån och inte via getvariable() i varje fil, så att en
+       -- handkörd `duckdb -f pipeline/verify.sql` utan preamble inte kan
+       -- rapportera två invarianter gröna som inte kan fälla.
+       CASE WHEN getvariable('min_week_obs') IS NULL
+            THEN error('min_week_obs är inte satt — se preamblen i pipeline/run.sh')
+            ELSE getvariable('min_week_obs')::INTEGER END AS min_week_obs;
 
 -- ---------------------------------------------------------------------------
 -- Week axis

@@ -1,8 +1,13 @@
 # Phase 1 Contract: Published Chart JSON
 
-Three files under `site/public/data/`. This is the boundary between the pipeline and
+Five files under `site/public/data/`. This is the boundary between the pipeline and
 the frontend: `50_export.sql` writes it, `Data.scala` decodes it, and neither may
 change unilaterally.
+
+**Two axes, not one.** Four files share a `weeks` axis and are positionally
+interchangeable. `cracks_daily.json` has its own `days` axis and is **not**. The
+distinction is enforced: `verify 8` rejects a daily file that carries a `weeks`
+key at all, precisely so nothing can start indexing one against the other.
 
 ## Shared conventions
 
@@ -123,7 +128,7 @@ Conversion the frontend performs, for a value `v` in currency `c` at week `i`:
 | USD → EUR | `v / USD[i]` |
 | USD → SEK | `v / USD[i] * SEK[i]` |
 
-`weeks` is identical across all three files by construction — all are left-joined
+`weeks` is identical across all four weekly files by construction — all are left-joined
 onto `week_calendar` — which lets the frontend index by position instead of matching
 dates.
 
@@ -153,3 +158,73 @@ this rather than assuming, and states which geography is on screen.
 Values are USD per litre, converted in the browser like every other retail
 series. There is no national-average entry here; the chart takes it from
 `retail.json` so the two charts cannot disagree about what the US average is.
+
+
+## `cracks_daily.json` (feature 003)
+
+```json
+{
+  "meta": { "...": "...", "formulae": {
+      "us_ulsd_brent": "ULSD USD/gal x 42 - Brent USD/bbl",
+      "ma7": "Unweighted mean of the daily values over the trailing 7 calendar days,
+              inclusive. Emitted only where the window holds at least 3 observations." } },
+  "days": ["2022-01-03", "2022-01-04", "2022-01-05", "..."],
+  "series": [
+    { "key": "us_ulsd_brent", "label": "NYH ULSD – Brent", "kind": "spread",
+      "region": "US", "unit": "USD/bbl", "of": null,
+      "values": [23.41, 24.02, null, "..."] },
+    { "key": "us_ulsd_brent_ma7", "label": "NYH ULSD – Brent, 7d", "kind": "ma",
+      "region": "US", "unit": "USD/bbl", "of": "us_ulsd_brent",
+      "values": [null, null, 23.72, "..."] }
+  ]
+}
+```
+
+**`days` is an observation axis, not a calendar.** It carries only dates on which
+a source published, so weekends are absent rather than null — a weekend is not a
+missing observation. This is the opposite of `weeks`, which is a dense calendar
+where a hole genuinely is a hole. The two are therefore **not positionally
+comparable**, and nothing may index one against the other. `verify 8` fails the
+file if it carries a `weeks` key, `verify 15` rejects a duplicated date, and
+`verify 18` rejects a non-ascending axis — a swapped pair changes no array length
+and would otherwise draw the wrong dates in silence.
+
+`kind` is `spread`, `ma` or `level`. `of` names the series an `ma` smooths, and
+is `null` otherwise; the frontend pairs them by this field rather than by parsing
+the key.
+
+The empty-series exemption of `verify 17` covers `nwe_gasoil_brent` **and**
+`nwe_gasoil_brent_ma7` — an absent daily series cannot have a ruler — but no
+other key.
+
+### The 7-day ruler
+
+Trailing **7 calendar days**, inclusive of the current day, unweighted, emitted
+only where the window holds at least 3 observations.
+
+Calendar days rather than 7 observations is a deliberate choice. In steady state
+the window holds the five trading days of one week; over a public holiday it
+shortens honestly, where a 7-observation window would silently reach nine
+calendar days back and label the result "7-day". The minimum of 3 is the same
+constant as the weekly-coverage floor (`min_week_obs`, set in `run.sh`), so the
+two can never drift apart.
+
+`verify 14` recomputes every point with a correlated subquery rather than with the
+window function that produced it, and checks the threshold in both directions: a
+point that should be absent but is present fails just as a wrong value does.
+
+## Weekly coverage (feature 003)
+
+A weekly leg is published only if at least 3 daily observations back it;
+otherwise it is `null` and the spreads derived from it follow by null
+propagation. Three, not five, so a holiday-shortened trading week survives.
+
+This is why the weekly crack series routinely ends one to two weeks before the
+weekly retail series: EIA publishes spot with roughly a week's lag, so the last
+calendar week is usually still incomplete. `verify 7` allows 21 days of slack for
+the crack for exactly this reason, while retail keeps 14. Recency lives in
+`cracks_daily.json`, and `verify 16` is what actually guards it.
+
+`verify 13` recomputes coverage from `stg.spot_daily` rather than reading the
+aggregate that produced the row — a check that reads its own `GROUP BY` cannot
+fail, which this pipeline has already shipped three times.

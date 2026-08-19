@@ -90,6 +90,92 @@ COPY (
 ) TO 'site/public/data/cracks.json' (FORMAT json, ARRAY false);
 
 -- ---------------------------------------------------------------------------
+-- cracks_daily.json
+--
+-- Egen fil, och egen axel. `days` är observationsdatum — inte kalenderdagar —
+-- och kan därför INTE indexeras mot `weeks` i de andra filerna. Det är hela
+-- skälet till att den ligger för sig: en delad axel som bara ibland stämmer är
+-- värre än två som aldrig påstår att de gör det.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE TABLE stg.crack_daily_points AS
+SELECT series_key, obs_date, usd_per_bbl AS value FROM stg.crack_daily
+UNION ALL
+SELECT series_key || '_ma7', obs_date, usd_per_bbl FROM stg.crack_daily_ma
+UNION ALL SELECT 'brent', obs_date, brent_usd_per_bbl FROM stg.legs_daily
+UNION ALL SELECT 'wti',   obs_date, wti_usd_per_bbl   FROM stg.legs_daily
+UNION ALL SELECT 'ulsd',  obs_date, ulsd_usd_per_gal  FROM stg.legs_daily;
+
+-- Deklarerad, inte härledd — av samma skäl som veckofilen: en serie som saknas
+-- ska betyda en bugg, inte en tom källa. 'of' binder linjalen till serien den
+-- jämnar ut, så frontend slipper gissa ur namnet.
+CREATE OR REPLACE TABLE stg.crack_daily_series_def (
+  series_key VARCHAR, label VARCHAR, kind VARCHAR,
+  region VARCHAR, unit VARCHAR, of VARCHAR, ord INTEGER
+);
+INSERT INTO stg.crack_daily_series_def VALUES
+  ('us_ulsd_brent',        'NYH ULSD – Brent',   'spread', 'US',  'USD/bbl', NULL,              1),
+  ('us_ulsd_wti',          'NYH ULSD – WTI',     'spread', 'US',  'USD/bbl', NULL,              2),
+  ('nwe_gasoil_brent',     'ICE gasoil – Brent', 'spread', 'NWE', 'USD/bbl', NULL,              3),
+  ('us_ulsd_brent_ma7',    'NYH ULSD – Brent, 7d', 'ma',   'US',  'USD/bbl', 'us_ulsd_brent',   4),
+  ('us_ulsd_wti_ma7',      'NYH ULSD – WTI, 7d',   'ma',   'US',  'USD/bbl', 'us_ulsd_wti',     5),
+  ('nwe_gasoil_brent_ma7', 'ICE gasoil – Brent, 7d','ma',  'NWE', 'USD/bbl', 'nwe_gasoil_brent',6),
+  ('brent',                'Brent',              'level',  'US',  'USD/bbl', NULL,              7),
+  ('wti',                  'WTI',                'level',  'US',  'USD/bbl', NULL,              8),
+  ('ulsd',                 'NYH ULSD',           'level',  'US',  'USD/gal', NULL,              9);
+
+COPY (
+  WITH aligned AS (
+    SELECT d.*, a.obs_date, p.value
+    FROM stg.crack_daily_series_def d
+    CROSS JOIN stg.day_axis a
+    LEFT JOIN stg.crack_daily_points p
+      ON p.series_key = d.series_key AND p.obs_date = a.obs_date
+  ),
+  series AS (
+    SELECT ord, {
+      'key':    any_value(series_key),
+      'label':  any_value(label),
+      'kind':   any_value(kind),
+      'region': any_value(region),
+      'unit':   any_value(unit),
+      'of':     any_value(of),
+      'values': CASE WHEN count(value) = 0 THEN []::DOUBLE[]
+                     ELSE list(round(value, 2) ORDER BY obs_date) END
+    } AS s
+    FROM aligned GROUP BY ord
+  )
+  SELECT
+    {
+      'generated': getvariable('generated'),
+      'synthetic': NOT getvariable('strict')::BOOLEAN,
+      'sources': [
+        {'name':    'EIA Open Data v2',
+         'url':     'https://www.eia.gov/opendata/',
+         'licence': 'US Government work, public domain',
+         'series':  ['RBRTE', 'RWTC', 'EER_EPD2DXL0_PF4_Y35NY_DPG']},
+        {'name':    'ICE Low Sulphur Gasoil (manual)',
+         'url':     'https://www.ice.com/products/34361119/Low-Sulphur-Gasoil-Futures',
+         'licence': 'Not redistributable; user-supplied via data/manual/ice_gasoil.csv',
+         'series':  ['ICE gasoil settlement']}
+      ],
+      'formulae': {
+        'us_ulsd_brent':    'ULSD USD/gal x 42 - Brent USD/bbl',
+        'us_ulsd_wti':      'ULSD USD/gal x 42 - WTI USD/bbl',
+        'nwe_gasoil_brent': 'ICE gasoil USD/t / 7.45 - Brent USD/bbl',
+        'ma7':              'Unweighted mean of the daily values over the trailing 7 '
+                            'calendar days, inclusive. Emitted only where the window holds '
+                            'at least ' || getvariable('min_week_obs')::VARCHAR || ' observations.'
+      },
+      'note': 'One point per EIA observation date, so weekends are absent rather than null. '
+              'This axis is NOT positionally comparable with the weekly files. EIA publishes '
+              'spot prices with a lag of roughly a week; the last date here is the last one '
+              'EIA had published when the pipeline ran, not today.'
+    } AS meta,
+    (SELECT list(obs_date ORDER BY obs_date) FROM stg.day_axis) AS days,
+    (SELECT list(s ORDER BY ord) FROM series)                   AS series
+) TO 'site/public/data/cracks_daily.json' (FORMAT json, ARRAY false);
+
+-- ---------------------------------------------------------------------------
 -- retail.json
 --
 -- EU prices are EUR/L from the Oil Bulletin; the US series is USD/gal from EIA,

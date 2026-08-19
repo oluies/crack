@@ -19,6 +19,8 @@ object Main:
   private val crackMode   = Var("threshold")   // "line" | "threshold"
   private val crackPick   = Var("us_ulsd_brent")
   private val threshold   = Var(25.0)
+  private val crackScale  = Var("weekly")     // "weekly" | "daily"
+  private val crackRuler  = Var(true)         // 7-dagarslinjalen i dagsläget
 
   private val retailFuel  = Var("diesel")      // "diesel" | "gasoline"
   private val retailTax    = Var("with")       // "with" | "without"
@@ -81,7 +83,7 @@ object Main:
 
   // -- vyer -----------------------------------------------------------------
 
-  private def crackSection(c: Data.Cracks): HtmlElement =
+  private def crackSection(c: Data.Cracks, dc: Data.DailyCracks): HtmlElement =
     // Vilken serie tröskelläget fyller. Härledd i stället för återställd: om
     // valet inte hör till regionen tas regionens första, så ett regionbyte
     // aldrig kan lämna ett omöjligt tillstånd efter sig.
@@ -91,10 +93,7 @@ object Main:
         ss.find(_.key == pick).orElse(ss.headOption)
       }
 
-    val hasData: Signal[Boolean] =
-      crackRegion.signal.map(r => c.spreads(r).exists(_.values.nonEmpty))
-
-    val option: Signal[js.Any] =
+    val weeklyOption: Signal[js.Any] =
       crackMode.signal
         .combineWith(crackRegion.signal, selected, threshold.signal)
         .map { (mode, region, sel, th) =>
@@ -102,27 +101,63 @@ object Main:
           else sel.fold(Charts.crackLine(c, region))(s => Charts.crackThreshold(c, s, th))
         }
 
+    val option: Signal[js.Any] =
+      crackScale.signal
+        .combineWith(weeklyOption, crackRegion.signal, crackRuler.signal)
+        .map { (scale, weekly, region, ruler) =>
+          if scale == "daily" then Charts.crackDaily(dc, region, ruler) else weekly
+        }
+
+    // Tomläget gäller båda skalorna: NWE saknar källa i dag- såväl som veckofil.
+    val hasDaily: Signal[Boolean] =
+      crackScale.signal.combineWith(crackRegion.signal).map { (scale, r) =>
+        if scale == "daily" then dc.spreads(r).exists(_.values.nonEmpty)
+        else c.spreads(r).exists(_.values.nonEmpty)
+      }
+
     div(
       idAttr := "cracks",
       h1("Diesel crack spreads"),
       p(
-        "What a refiner earns per barrel turning crude into diesel, weekly. ",
+        "What a refiner earns per barrel turning crude into diesel. ",
         "The US legs come from EIA spot prices; the North-West European leg needs ",
         "ICE gasoil, which has no free API."
+      ),
+      p(
+        cls := "prov",
+        "Weekly points are averages of the trading days in an ISO week, and a week ",
+        "with fewer than three published days is left blank rather than averaged as ",
+        "if it were complete. Daily shows every EIA observation, with an optional ",
+        "7-day ruler — the unweighted mean of the trailing seven calendar days, ",
+        "which is one trading week. EIA publishes spot prices about a week in ",
+        "arrears, so the last point is never today."
       ),
       div(
         cls := "controls",
         toggle("Region", crackRegion, Seq("US" -> "US (NYH)", "NWE" -> "NW Europe")),
-        toggle("View", crackMode, Seq("threshold" -> "Threshold", "line" -> "Line")),
+        toggle("Scale", crackScale, Seq("weekly" -> "Weekly", "daily" -> "Daily")),
+        // Linjalen finns bara i dagsläget: en 7-dagarslinjal över veckomedelvärden
+        // hade jämnat ut ett redan utjämnat tal och sagt ingenting.
+        child.maybe <-- crackScale.signal.map { sc =>
+          Option.when(sc == "daily")(
+            toggle("7-day ruler", crackRuler, Seq(true -> "On", false -> "Off"))
+          )
+        },
+        // Tröskel- och linjeläget hör till veckoskalan.
+        child.maybe <-- crackScale.signal.map { sc =>
+          Option.when(sc == "weekly")(
+            toggle("View", crackMode, Seq("threshold" -> "Threshold", "line" -> "Line"))
+          )
+        },
         // Seriepickern hör bara till tröskelläget, som fyller en serie i taget.
-        child.maybe <-- crackMode.signal.combineWith(crackRegion.signal).map { (m, r) =>
+        child.maybe <-- crackMode.signal.combineWith(crackRegion.signal, crackScale.signal).map { (m, r, sc) =>
           val ss = c.spreads(r)
-          Option.when(m == "threshold" && ss.length > 1)(
+          Option.when(sc == "weekly" && m == "threshold" && ss.length > 1)(
             toggle("Series", crackPick, ss.map(s => s.key -> s.label))
           )
         },
-        child.maybe <-- crackMode.signal.map { m =>
-          Option.when(m == "threshold")(
+        child.maybe <-- crackMode.signal.combineWith(crackScale.signal).map { (m, sc) =>
+          Option.when(sc == "weekly" && m == "threshold")(
             div(
               cls := "group",
               span(cls := "lbl", "Threshold USD/bbl"),
@@ -142,9 +177,28 @@ object Main:
               )
             )
           )
+        },
+        // Färskheten står bredvid reglagen, inte i en fotnot: meta.generated
+        // säger när pipelinen kördes och säger ingenting om hur gammal datan är,
+        // och det är precis den förväxlingen som fick en läsare att jämföra
+        // veckosnittet med en dagskurs.
+        child.maybe <-- crackScale.signal.map { sc =>
+          Option.when(sc == "daily")(
+            div(
+              cls := "group",
+              span(
+                cls := "lbl",
+                (dc.lastObservation, dc.lagDays) match
+                  case (Some(last), Some(lag)) =>
+                    s"Last EIA observation $last — $lag days before this refresh"
+                  case (Some(last), None) => s"Last EIA observation $last"
+                  case _                  => "No observations"
+              )
+            )
+          )
         }
       ),
-      child <-- hasData.map {
+      child <-- hasDaily.map {
         case true => chartBox(option)
         case false =>
           div(
@@ -310,15 +364,16 @@ object Main:
     val loaded =
       for
         c  <- Data.cracks(DataBase)
+        dc <- Data.cracksDaily(DataBase)
         r  <- Data.retail(DataBase)
         fx <- Data.fx(DataBase)
         g  <- Data.usregions(DataBase)
-      yield (c, r, fx, g)
+      yield (c, dc, r, fx, g)
 
     loaded.onComplete {
-      case Success((c, r, fx, g)) =>
+      case Success((c, dc, r, fx, g)) =>
         mount.innerHTML = ""
-        render(mount, div(crackSection(c), retailSection(r, fx),
+        render(mount, div(crackSection(c, dc), retailSection(r, fx),
                           usSection(g, r, fx), dualSection(c, r), notes))
         // Ankaret hinner inte finnas när webbläsaren försöker hoppa dit: appen
         // renderas först när de tre JSON-filerna kommit. Utan detta gör en delad

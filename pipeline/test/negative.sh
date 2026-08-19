@@ -41,6 +41,7 @@ die() { echo "FEL: $*" >&2; exit 2; }
 [ -f "$SRC_JSON/cracks.json" ] || die "$SRC_JSON/cracks.json saknas — kör pipeline/run.sh --fixtures först"
 [ -f "$SRC_JSON/retail.json" ] || die "$SRC_JSON/retail.json saknas"
 [ -f "$SRC_JSON/fx.json" ]     || die "$SRC_JSON/fx.json saknas"
+[ -f "$SRC_JSON/cracks_daily.json" ] || die "$SRC_JSON/cracks_daily.json saknas"
 command -v python3 >/dev/null  || die "python3 krävs för JSON-korruptionerna"
 command -v duckdb  >/dev/null  || die "duckdb krävs"
 
@@ -59,6 +60,7 @@ SET VARIABLE manual_dir = '$ROOT/data/manual';
 SET VARIABLE start_week = '2022-01-03';
 SET VARIABLE generated  = '1970-01-01';
 SET VARIABLE strict     = true;
+SET VARIABLE min_week_obs = 3;
 SET VARIABLE out_dir    = '$TMP/data';
 SQL
 
@@ -186,6 +188,40 @@ expect_pass "crack staleness silent on a fixtures build" \
   "UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.crack_weekly WHERE week_start > DATE '2026-01-01';" verify
 
+# --- täckning, linjal och dagsaxel -------------------------------------------
+#
+# Check 13 räknar om täckningen ur stg.spot_daily i stället för ur den GROUP BY
+# som byggde stg.legs_weekly. Korruptionen nedan utnyttjar precis det: den tar
+# bort handelsdagar UNDER en publicerad vecka och lämnar veckovärdet kvar. Hade
+# kontrollen läst samma aggregat som produktionen hade den inte kunnat fälla —
+# vilket är hela skälet till att den inte gör det.
+expect_fail "a published week loses its trading days" "verify 13" \
+  "DELETE FROM stg.spot_daily
+    WHERE date_trunc('week', obs_date) = DATE '2023-06-05'
+      AND obs_date > DATE '2023-06-06';" verify
+
+# Linjalen måste vara det den utger sig för. Två felriktningar, båda prövade:
+expect_fail "MA7 no longer equals its window" "verify 14" \
+  "UPDATE stg.crack_daily_ma SET usd_per_bbl = usd_per_bbl + 5
+    WHERE obs_date = DATE '2023-06-07';" verify
+
+# ... och en punkt som borde SAKNAS men finns: de första dagarna har för få
+# observationer i fönstret, och ett medelvärde av en enda punkt vore bara
+# dagslinjen ritad med tjockare penna.
+expect_fail "MA7 emitted where the window is too thin" "verify 14" \
+  "UPDATE stg.crack_daily_ma SET usd_per_bbl = 50.0
+    WHERE obs_date = (SELECT min(obs_date) FROM stg.crack_daily_ma);" verify
+
+expect_fail "a day appears twice on the daily axis" "verify 15" \
+  "INSERT INTO stg.day_axis SELECT min(obs_date) FROM stg.day_axis;" verify
+
+# Dagsserien är där färskhet faktiskt mäts — veckoserien slutar regelmässigt en
+# vecka tidigt av konstruktion, så check 7 kan inte göra det jobbet.
+expect_fail "daily data gone stale (strict build)" "verify 16" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.crack_daily    WHERE obs_date > DATE '2024-01-01';
+   DELETE FROM stg.crack_daily_ma WHERE obs_date > DATE '2024-01-01';" verify
+
 # --- published JSON ----------------------------------------------------------
 
 expect_fail "cracks.json meta removed" "verify 8" \
@@ -214,6 +250,24 @@ expect_fail "a retail series truncated" "verify 10" \
 
 expect_fail "a null inside fx rates" "verify 11" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"rates\"][\"SEK\"][5]=None;json.dump(d,open(\"fx.json\",\"w\"))"' export
+
+expect_fail "a cracks_daily series truncated" "verify 17" \
+  '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));d[\"series\"][0][\"values\"]=d[\"series\"][0][\"values\"][:100];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
+
+# En verklig serie tömd är inte ICE-stubben och får inte omfattas av undantaget.
+expect_fail "daily brent emptied (not the ICE stub)" "verify 17" \
+  '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));[s.update(values=[]) for s in d[\"series\"] if s[\"key\"]==\"brent\"];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
+
+# En omkastad dag ändrar ingen arraylängd — bara vilket datum varje värde hör
+# till. Utan check 18 ritas fel år utan att något ser tomt ut.
+expect_fail "the daily axis goes backwards" "verify 18" \
+  '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));d[\"days\"][5],d[\"days\"][6]=d[\"days\"][6],d[\"days\"][5];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
+
+# Dagsfilen får inte bära en veckoaxel: check 12 jämför weeks[] mellan filerna,
+# och en dagsfil med weeks[] hade antingen fällt den eller, värre, passerat och
+# fått frontend att indexera dagsvärden mot veckor.
+expect_fail "daily file grows a weeks axis" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"cracks_daily.json\"));d[\"weeks\"]=d[\"days\"];json.dump(d,open(\"cracks_daily.json\",\"w\"))"' export
 
 expect_fail "week axes disagree" "verify 12" \
   '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"weeks\"]=[\"1999-01-04\"]+d[\"weeks\"][1:];json.dump(d,open(\"fx.json\",\"w\"))"' export

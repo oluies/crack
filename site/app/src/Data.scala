@@ -32,6 +32,43 @@ object Data:
     def level(key: String): Option[Crack] =
       series.find(s => s.kind == "level" && s.key == key)
 
+  /**
+   * Dagsfilen. Egen axel — `days` är observationsdatum, inte en kalender — och
+   * den får INTE indexeras mot `weeks` i de andra filerna. Det är därför den är
+   * en egen typ med ett eget axelfält i stället för ännu en Cracks.
+   *
+   * `of` binder en linjal till serien den jämnar ut, så inget behöver läsas ur
+   * seriens namn.
+   */
+  final case class Daily(
+      key: String, label: String, kind: String,
+      region: String, unit: String, of: Option[String], values: Series
+  )
+  final case class DailyCracks(meta: Meta, days: Vector[String], series: Vector[Daily]):
+    def spreads(region: String): Vector[Daily] =
+      series.filter(s => s.kind == "spread" && s.region == region)
+    def ma(key: String): Option[Daily] =
+      series.find(s => s.kind == "ma" && s.of.contains(key))
+
+    /** Sista dagen med en observation i någon spread — inte sista dagen i axeln. */
+    def lastObservation: Option[String] =
+      val idx = series
+        .filter(_.kind == "spread")
+        .flatMap(s => s.values.zipWithIndex.collect { case (Some(_), i) => i })
+      Option.when(idx.nonEmpty)(days(idx.max))
+
+    /**
+     * Dygn mellan sista observationen och körningen. EIA ligger normalt ~8 dagar
+     * efter, och det syns ingenstans i meta.generated — den säger när pipelinen
+     * kördes, inte hur färsk datan är. Skillnaden är hela poängen med att skriva
+     * ut den.
+     */
+    def lagDays: Option[Int] =
+      lastObservation.map { last =>
+        val ms = js.Date.parse(meta.generated) - js.Date.parse(last)
+        math.round(ms / 86400000.0).toInt
+      }
+
   final case class Retail(
       cc: String, label: String, region: String, focus: Boolean,
       fuel: String, tax: String, currency: String, values: Series
@@ -101,6 +138,21 @@ object Data:
         arr(d.weeks).map(str),
         arr(d.series).map(s =>
           Crack(str(s.key), str(s.label), str(s.kind), str(s.region), str(s.unit), series(s.values))
+        )
+      )
+    }
+
+  def cracksDaily(base: String): Future[DailyCracks] =
+    fetchJson(s"$base/cracks_daily.json").map { d =>
+      DailyCracks(
+        meta(d.meta),
+        arr(d.days).map(str),
+        arr(d.series).map(s =>
+          Daily(
+            str(s.key), str(s.label), str(s.kind), str(s.region), str(s.unit),
+            if s.of == null || js.isUndefined(s.of) then None else Some(str(s.of)),
+            series(s.values)
+          )
         )
       )
     }

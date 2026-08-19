@@ -26,18 +26,30 @@ ROOT="$1"; OUT_DIR="$2"; EXPORT_SQL="$3"
 # repo root; out_dir is absolute. Compare them in the same terms.
 REL="${OUT_DIR#"$ROOT"/}"
 
-missing=""
-for f in cracks retail fx usregions; do
-  # -F: $REL är en sökväg, inte ett reguljärt uttryck. Ett '[' i den skulle ge
-  # ett parse-fel och fälla guarden med fel förklaring; punkten i .json skulle
-  # tyst matcha vilket tecken som helst.
-  grep -qF "TO '$REL/$f.json'" "$EXPORT_SQL" || missing="$missing $f.json"
+# Målen läses UR filen i stället för ur en lista här. En hårdkodad lista är
+# tyst för precis det fel som är lättast att göra — en ny COPY som skriver
+# någon annanstans — och den listan har redan hunnit bli inaktuell en gång.
+TARGETS=$(grep -oE "TO '[^']*\.json'" "$EXPORT_SQL" | sed "s/^TO '//; s/'$//")
+
+[ -n "$TARGETS" ] || {
+  echo "FEL: hittade inga COPY ... TO '...json'-mål i $EXPORT_SQL" >&2
+  echo "     Antingen har exporten slutat skriva JSON, eller så har formen ändrats" >&2
+  echo "     så att den här kontrollen inte längre ser målen — båda måste åtgärdas." >&2
+  exit 1
+}
+
+wrong=""
+for t in $TARGETS; do
+  case "$t" in
+    "$REL"/*) ;;
+    *) wrong="$wrong $t" ;;
+  esac
 done
 
-if [ -n "$missing" ]; then
-  echo "FEL: $(basename "$EXPORT_SQL") skriver inte till '$REL/' för:$missing" >&2
+if [ -n "$wrong" ]; then
+  echo "FEL: $(basename "$EXPORT_SQL") skriver utanför '$REL/':$wrong" >&2
   echo "     Verifieringen läser ur $OUT_DIR, så exporten skulle kontrolleras mot" >&2
   echo "     filer den inte skrev. Ändra COPY-målen, eller OUT_DIR i run.sh, så att" >&2
-  echo "     de tre filerna skrivs och läses på samma plats." >&2
+  echo "     filerna skrivs och läses på samma plats." >&2
   exit 1
 fi

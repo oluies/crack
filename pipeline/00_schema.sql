@@ -1,4 +1,6 @@
--- 00_schema.sql — extensions, week axis and country reference.
+-- 00_schema.sql — extensions, build metadata and country reference.
+--
+-- The week axis is NOT here; it lives in pipeline/25_calendar.sql. See below.
 --
 -- Variables (set by run.sh's generated preamble):
 --   work_dir    directory holding the downloaded upstream files

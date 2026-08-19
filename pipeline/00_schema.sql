@@ -6,9 +6,10 @@
 --   strict        whether the freshness invariants are fatal for this build
 --   min_week_obs  minimum daily observations behind a publishable week
 --
--- Not work_dir or start_week: those belong to 10/15/20 and to 25_calendar.sql
--- respectively. start_week is the axis's lower bound, so listing it here would
--- re-imply the very thing the third line above denies.
+-- Not work_dir or start_week. work_dir belongs to the loaders (10/15/30);
+-- start_week is read wherever a source is trimmed (10/15/20/40) as well as by
+-- 25_calendar.sql, where it is the axis's lower bound — and that last reading is
+-- why listing it here would re-imply the very thing the third line above denies.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;

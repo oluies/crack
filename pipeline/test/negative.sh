@@ -704,10 +704,13 @@ broken_guard_case
 # ${1:?} gav precis 1, vilket är varför raden finns.
 # Utdatan behålls: en röd som bara säger "exit 1, väntade 2" döljer vilken gren
 # som kördes, och det är den här filens hela poäng att en röd förklarar sig.
-bad_call() {  # $@ = argumenten att pröva
-  local out rc label
-  label="wrong call: $(if [ $# -eq 0 ]; then printf 'inga argument'; else printf "'%s' " "$@"; fi)"
+bad_call() {  # $1 = vad som prövas, $2.. = argumenten
+  local label="$1"; shift
+  local out rc
+  # Etiketten beskriver avsikten och inte värdena: en $TMP-sökväg i utskriften är
+  # både oläsbar och olika vid varje körning.
   out=$(pipeline/check-build-pairing.sh "$@" 2>&1); rc=$?
+  label="wrong call: $label"
   if [ "$rc" = 2 ]; then
     printf 'ok    %-44s -> exit 2\n' "$label"; pass=$((pass+1))
   else
@@ -716,12 +719,14 @@ bad_call() {  # $@ = argumenten att pröva
   fi
 }
 
-bad_call
-bad_call "bara-ett"
-# Två TOMMA argument passerar en ren antalskontroll. ${1:?} fällde dem; en
+bad_call "inga argument"
+bad_call "bara ett argument" "bara-ett"
+# Tomma argument passerar en ren antalskontroll. ${1:?} fällde dem; en
 # $#-kontroll ensam gör det inte, och svaret blir exit 0 på ett trasigt anrop.
-bad_call "" ""
-bad_call "$TMP/t.duckdb" ""
+# Bägge leden prövas var för sig — annars kan det ena regrediera obemärkt.
+bad_call "bägge tomma"      "" ""
+bad_call "tom databas"      "" "$TMP/data"
+bad_call "tom out_dir"      "$TMP/t.duckdb" ""
 
 # --- the fetch retry logic ---------------------------------------------------
 #

@@ -148,10 +148,12 @@ SQL
 if [ "$MODE" = "verify" ]; then
   # Egen skriptfil så att negative.sh kan bevisa att den både fäller och håller
   # tyst — se check-build-pairing.sh för varför paret kan hamna i otakt.
-  # Inget "|| die": set -e propagerar guardens exitkod, och en extra FEL-rad utan
-  # innehåll under guardens egen fyrradiga diagnos vore två diagnoser för ett fel
-  # — just det som skriptet självt säger att det finns för att undvika.
-  pipeline/check-build-pairing.sh "$DB" "$OUT_DIR"
+  # "|| exit 1", inte "|| die": guarden skriver redan sin egen diagnos, och en
+  # extra FEL-rad utan innehåll vore två diagnoser för ett fel — just det
+  # skriptet självt säger att det finns för att undvika. Men statusen görs
+  # explicit ändå: set -e ensamt är positionellt, och samma anrop flyttat in i
+  # ett if, ett &&, ett ! eller en pipeline blir tyst rådgivande.
+  pipeline/check-build-pairing.sh "$DB" "$OUT_DIR" || exit 1
   say "kör invarianter"
   duckdb "$DB" -f "$WORK/preamble.sql" \
     -f pipeline/verify.sql -f pipeline/60_verify_export.sql

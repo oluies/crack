@@ -598,6 +598,15 @@ else
   printf 'FAIL  %-44s should have stayed green\n' "no database to compare"; fail=$((fail+1))
 fi
 
+reset_copy
+# Tredje tysta grenen: filen finns men stg.build_meta går inte att läsa.
+duckdb "$TMP/tom.duckdb" -c "SELECT 1" >/dev/null 2>&1 || die "kunde inte skapa en tom databas"
+if pipeline/check-build-pairing.sh "$TMP/tom.duckdb" "$TMP/data" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "database without build_meta"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "database without build_meta"; fail=$((fail+1))
+fi
+
 # --- the fetch retry logic ---------------------------------------------------
 #
 # The argument for the guard above applies to the retry too: the properties this

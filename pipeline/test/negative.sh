@@ -154,6 +154,11 @@ expect_fail "database predates built_on" "verify 1a" \
 expect_fail "database predates min_week_obs" "verify 1a" \
   "ALTER TABLE stg.build_meta DROP COLUMN min_week_obs;" verify
 
+# En hel tabell borta, inte bara en kolumn: en databas från före feature 003 har
+# ingen day_axis, och utan 1a blir svaret ett katalogfel som namnger tabellen.
+expect_fail "database predates the daily tables" "verify 1a" \
+  "DROP TABLE stg.day_axis;" verify
+
 expect_fail "build_meta emptied (min_week_obs unreadable)" "verify 1d" \
   "DELETE FROM stg.build_meta;" verify
 

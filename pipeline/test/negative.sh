@@ -705,18 +705,26 @@ broken_guard_case
 # Utdatan behålls: en röd som bara säger "exit 1, väntade 2" döljer vilken gren
 # som kördes, och det är den här filens hela poäng att en röd förklarar sig.
 bad_call() {  # $1 = vad som prövas, $2.. = argumenten
-  local label="$1"; shift
-  local out rc
-  # Etiketten beskriver avsikten och inte värdena: en $TMP-sökväg i utskriften är
-  # både oläsbar och olika vid varje körning.
+  local intent="$1"; shift
+  local out rc shown label
+  # Avsikten OCH de faktiska argumenten, med $TMP maskerad. Bara avsikten vore
+  # handskriven och kunde glida isär från anropet utan att något märkte det;
+  # bara argumenten ger en oläsbar sökväg som dessutom skiftar varje körning.
+  shown="${*//$TMP/\$TMP}"
+  label="wrong call: $intent [${shown:-}]"
+
   out=$(pipeline/check-build-pairing.sh "$@" 2>&1); rc=$?
-  label="wrong call: $label"
-  if [ "$rc" = 2 ]; then
-    printf 'ok    %-44s -> exit 2\n' "$label"; pass=$((pass+1))
+
+  # Exitkoden ensam räcker inte: skriptet kör under set -e, så vilket framtida
+  # kommando som helst som avslutar med 2 propagerar 2 — och alla fem proven
+  # hade rapporterat grönt för en guard som aldrig nådde användningsgrinden.
+  if [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF 'usage:'; then
+    printf 'ok    %-44s -> exit 2, usage\n' "$label"; pass=$((pass+1))
   else
-    printf 'FAIL  %-44s -> exit %s, väntade 2\n      %s\n' "$label" "$rc" \
+    printf 'FAIL  %-44s -> exit %s (väntade 2 + usage:)\n      %s\n' "$label" "$rc" \
       "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
   fi
+  return 0
 }
 
 bad_call "inga argument"

@@ -150,8 +150,12 @@ against each other; one source of truth plus client-side arithmetic cannot
 
 **Weeks are ISO weeks keyed to Monday.** EIA spot is daily, EIA retail is Monday, the
 Oil Bulletin is weekly-on-Monday-for-the-prior-week. Bucketing everything to
-`date_trunc('week', …)` makes cross-source joins exact instead of approximate, and
-dropping the incomplete current week stops a two-day average from rendering as a dip.
+`date_trunc('week', …)` makes cross-source joins exact instead of approximate.
+
+Dropping the incomplete current week was the original guard against a two-day
+average rendering as a dip. It has since been replaced: a coverage floor on
+daily-sampled weeks does that job properly (003), and the axis now extends to a
+current week a weekly survey has already published (004). See FR-007.
 
 **One JSON file per chart, wide-form.** A shared week axis plus parallel value
 arrays, rather than a row per observation. This is what ECharts consumes and it is

@@ -76,12 +76,19 @@ jobs:
       # If those files are absent the deploy would publish a site that renders
       # nothing but the "could not load the published data" banner, so fail here
       # instead of shipping it.
+      # Listan härleds ur 50_export.sql:s COPY-mål via samma skript som
+      # check-export-paths.sh använder, inte ur en egen uppräkning. Den här
+      # listan hann sakna både usregions.json och cracks_daily.json innan
+      # någon märkte det, och en andra handhållen kopia hade gått isär igen.
       - name: Ensure published data exists
         run: |
+          targets=$(pipeline/export-targets.sh pipeline/50_export.sql)
           missing=0
-          for f in cracks retail fx; do
-            if [ ! -s "site/public/data/$f.json" ]; then
-              echo "FEL: site/public/data/$f.json saknas eller är tom"; missing=1
+          for f in $targets; do
+            if [ ! -s "$f" ]; then
+              echo "FEL: $f saknas eller är tom"; missing=1
+            else
+              echo "$f: $(wc -c < "$f") byte"
             fi
           done
           if [ "$missing" = 1 ]; then

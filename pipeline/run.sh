@@ -136,6 +136,11 @@ SET VARIABLE ob_path    = '$OB_PATH';
 SET VARIABLE start_week = '$START_WEEK';
 SET VARIABLE generated  = '$(date -u +%Y-%m-%d)';
 SET VARIABLE strict     = $STRICT;
+-- Minsta antal dagsobservationer bakom ett publicerat veckoben, och bakom
+-- en punkt på 7-dagarslinjalen. Tre, inte fem: en helgstängd handelsvecka
+-- har fyra dagar. Står här och inte i SQL:en för att veckoregeln och
+-- linjalen ska vara omöjliga att flytta isär.
+SET VARIABLE min_week_obs = 3;
 SET VARIABLE out_dir    = '$OUT_DIR';
 SQL
 

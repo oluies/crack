@@ -17,6 +17,11 @@
 --
 -- Contract: specs/001-crack-and-retail-fuel-site/contracts/chart-json.md
 
+-- VARNING, gäller varje kontroll här och i verify.sql: format() ger NULL om
+--     något argument är NULL, och error(NULL) kastar inte — den returnerar NULL
+--     och körningen fortsätter grön. Interpolerade uttryck coalesce:as därför
+--     till text, annars är kontrollen tyst i precis det värsta fallet.
+
 -- 8. Shape first, on the raw JSON.
 --
 --    Every check below reads the files through read_json, whose inferred schema
@@ -29,7 +34,8 @@ CREATE OR REPLACE TEMP TABLE published AS
 SELECT 'cracks.json' AS f, json FROM read_json_objects(getvariable('out_dir') || '/cracks.json')
 UNION ALL SELECT 'retail.json', json FROM read_json_objects(getvariable('out_dir') || '/retail.json')
 UNION ALL SELECT 'fx.json',     json FROM read_json_objects(getvariable('out_dir') || '/fx.json')
-UNION ALL SELECT 'usregions.json', json FROM read_json_objects(getvariable('out_dir') || '/usregions.json');
+UNION ALL SELECT 'usregions.json', json FROM read_json_objects(getvariable('out_dir') || '/usregions.json')
+UNION ALL SELECT 'cracks_daily.json', json FROM read_json_objects(getvariable('out_dir') || '/cracks_daily.json');
 
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 8: {} published file(s) have the wrong shape: {}',
@@ -38,7 +44,16 @@ END AS "8 published files well-formed"
 FROM (
   SELECT f,
     CASE
-      WHEN json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
+      -- cracks_daily.json bär `days`, inte `weeks`, och det är avsiktligt: axeln
+      -- är observationsdatum och får aldrig kunna förväxlas med veckoaxeln av
+      -- en läsare eller av check 12. Att kräva `weeks` här hade tvingat fram
+      -- just den förväxlingen.
+      WHEN f = 'cracks_daily.json' AND json_type(json->'$.days') IS DISTINCT FROM 'ARRAY'
+        THEN 'days is not an array'
+      WHEN f = 'cracks_daily.json' AND json_type(json->'$.weeks') IS NOT NULL
+        THEN 'daily file must not carry a weeks axis'
+      WHEN f <> 'cracks_daily.json'
+           AND json_type(json->'$.weeks') IS DISTINCT FROM 'ARRAY'  THEN 'weeks is not an array'
       WHEN json_type(json->'$.meta')  IS DISTINCT FROM 'OBJECT' THEN 'meta is not an object'
       WHEN f = 'usregions.json' AND (json_type(json->'$.regions') IS DISTINCT FROM 'ARRAY'
                                   OR json_array_length(json->'$.regions') = 0
@@ -50,6 +65,10 @@ FROM (
       WHEN f NOT IN ('fx.json', 'usregions.json')
            AND json_array_length(json->'$.series') = 0
         THEN 'series is empty'
+      WHEN f = 'cracks_daily.json' AND (json_type(json->'$.series[0].key')    IS DISTINCT FROM 'VARCHAR'
+                                     OR json_type(json->'$.series[0].kind')   IS DISTINCT FROM 'VARCHAR'
+                                     OR json_type(json->'$.series[0].values') IS DISTINCT FROM 'ARRAY')
+        THEN 'series elements lack key/kind/values'
       -- Element keys, not just the top level. read_json unifies the struct
       -- schema across list elements, so a key absent from EVERY element leaves
       -- the inferred struct without that field and s.values fails to BIND —
@@ -82,13 +101,18 @@ FROM (
 --    NULL, and NULL <> w is NULL, which would quietly not match.
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 9: {} series in cracks.json are misaligned (weeks={}): {}',
-                    count(*), any_value(w), string_agg(key || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
+                    count(*), coalesce(any_value(w)::VARCHAR, 'NULL'),
+                    string_agg(coalesce(key, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
 END AS "9 cracks.json series aligned"
 FROM (
   SELECT s.key AS key, len(s.values) AS n, len(weeks) AS w
   FROM (SELECT weeks, unnest(series) AS s FROM read_json(getvariable('out_dir') || '/cracks.json'))
 ) WHERE n IS NULL
-     OR (n IS DISTINCT FROM w AND NOT (n = 0 AND key = 'nwe_gasoil_brent'));
+     -- coalesce på key: med key = NULL blir NOT (0 = 0 AND NULL = '...') lika
+     -- med NULL, hela WHERE-uttrycket NULL, och raden väljs inte alls. En serie
+     -- som BÅDE tappat sin nyckel OCH är tom hade då seglat igenom — check 8
+     -- sonderar bara series[0] och ser den inte heller.
+     OR (n IS DISTINCT FROM w AND NOT (n = 0 AND coalesce(key, '') = 'nwe_gasoil_brent'));
 
 -- Exemplen kapas: en misslyckad axel gör alla 110 serier felaktiga, och en
 -- CI-logg med 110 namn i döljer felet i stället för att visa det.
@@ -104,7 +128,7 @@ SELECT CASE WHEN (SELECT count(*) FROM bad) > 0
   THEN error(format('verify 10: {} of {} series in retail.json are misaligned (weeks={}); first: {}',
                     (SELECT count(*) FROM bad),
                     (SELECT count(*) FROM allser),
-                    (SELECT any_value(w) FROM bad),
+                    coalesce((SELECT any_value(w) FROM bad)::VARCHAR, 'NULL'),
                     (SELECT string_agg(coalesce(label, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')
                      FROM (SELECT * FROM bad LIMIT 5))))
 END AS "10 retail.json series aligned"
@@ -130,7 +154,8 @@ WHERE rates.USD IS NULL
 -- 11b. usregions.json aligned to the same axis.
 SELECT CASE WHEN count(*) > 0
   THEN error(format('verify 11b: {} US region series are misaligned (weeks={}): {}',
-                    count(*), any_value(w), string_agg(code || '/' || fuel || '=' || coalesce(n::VARCHAR,'NULL'), ', ')))
+                    count(*), coalesce(any_value(w)::VARCHAR, 'NULL'),
+                    string_agg(coalesce(code, '?') || '/' || coalesce(fuel, '?') || '=' || coalesce(n::VARCHAR,'NULL'), ', ')))
 END AS "11b usregions.json aligned"
 FROM (
   SELECT s.code AS code, s.fuel AS fuel, len(s.values) AS n, len(weeks) AS w
@@ -151,5 +176,46 @@ SELECT CASE WHEN (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks
              OR (SELECT weeks FROM read_json(getvariable('out_dir') || '/cracks.json')) IS NULL
   THEN error('verify 12: the three JSON files do not share one week axis')
 END AS "12 shared week axis";
+
+-- 17. cracks_daily.json aligned to days[].
+--
+--     Samma resonemang som check 9, samma undantag: bara ICE-stubben får vara
+--     tom. Att lägga till "eller tom" generellt hade gjort en misslyckad
+--     EIA-hämtning grön, vilket är precis det den här filen finns för.
+--     MA-serierna omfattas av undantaget också — en tom dagsserie kan omöjligt
+--     ge en linjal — men bara den serien, inte alla ma7.
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 17: {} series in cracks_daily.json are misaligned (days={}): {}',
+                    count(*), coalesce(any_value(w)::VARCHAR, 'NULL'),
+                    string_agg(coalesce(key, '?') || '=' || coalesce(n::VARCHAR, 'NULL'), ', ')))
+END AS "17 cracks_daily.json series aligned"
+FROM (
+  SELECT s.key AS key, len(s.values) AS n, len(days) AS w
+  FROM (SELECT days, unnest(series) AS s FROM read_json(getvariable('out_dir') || '/cracks_daily.json'))
+) WHERE n IS NULL
+     OR (n IS DISTINCT FROM w
+         AND NOT (n = 0 AND coalesce(key, '') IN ('nwe_gasoil_brent', 'nwe_gasoil_brent_ma7')));
+
+-- 18. Dagsaxeln är stigande, unik och icke-tom.
+--
+--     Den kan inte jämföras mot veckoaxeln som check 12 gör — de mäter olika
+--     saker — så den kontrolleras mot sig själv i stället. En dubblett eller en
+--     omkastad dag skulle förskjuta varje values[] mot axeln och rita fel år
+--     utan att någon array ändrar längd.
+SELECT CASE WHEN (SELECT len(days) FROM read_json(getvariable('out_dir') || '/cracks_daily.json')) IS NULL
+             OR (SELECT len(days) FROM read_json(getvariable('out_dir') || '/cracks_daily.json')) = 0
+  THEN error('verify 18: cracks_daily.json has no days axis')
+END AS "18a daily axis present";
+
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 18: the daily axis is not strictly ascending ({} bad step(s), first at index {})',
+                    count(*), coalesce(min(i)::VARCHAR, 'none')))
+END AS "18 daily axis strictly ascending"
+FROM (
+  SELECT i, d
+  FROM (SELECT unnest(days) AS d, generate_subscripts(days, 1) AS i
+        FROM read_json(getvariable('out_dir') || '/cracks_daily.json'))
+  QUALIFY d <= lag(d) OVER (ORDER BY i)
+);
 
 SELECT 'export-invarianter gröna' AS verify;

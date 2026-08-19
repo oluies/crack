@@ -7,6 +7,61 @@
 -- Each check raises with a message naming what broke. .bail on (set by run.sh)
 -- stops at the first failure, so the message you see is the one that matters.
 
+-- ---------------------------------------------------------------------------
+-- VARNING, gäller varje kontroll i den här filen och i 60_verify_export.sql.
+--
+-- format() ger NULL om NÅGOT argument är NULL, och error(NULL) KASTAR INTE —
+-- den returnerar NULL och körningen fortsätter grön. En kontroll vars
+-- meddelande interpolerar ett värde som kan vara NULL är alltså tyst i precis
+-- det värsta fallet: en tom tabell. Upptäckt när check 14 vägrade fälla på en
+-- serie utan observationer i fönstret, där expected var NULL.
+--
+-- Samma sak gäller VILLKORET, inte bara meddelandet: NULL > 21 är NULL, och
+-- CASE faller igenom till grönt. Därför kommer check 1b först av allt.
+--
+-- Kontroll 1–6 interpolerar avsiktligt utan coalesce. Deras uttryck kan inte
+-- vara NULL när count(*) > 0: nycklarna kommer från kolumner som filtreras
+-- non-null redan i staging (10_eia.sql och 20_oilbulletin.sql), och min/max
+-- över en icke-tom mängd är non-null. Det är ett antagande om de filtren, inte
+-- en egenskap hos format() — flyttas ett filter måste de coalesce:as.
+-- ---------------------------------------------------------------------------
+
+-- 1b. Veckoaxeln finns över huvud taget.
+--
+--     Först, för att allt nedanför vilar på den. En tom stg.week_calendar gör
+--     inte bara meddelanden NULL utan villkoren också: check 1 räknar luckor
+--     över noll rader, check 6 kryssjoinar en tom kalender till noll rader, och
+--     staleness-uttrycket blir NULL - DATE '1900-01-01' > 21, alltså NULL. Ett
+--     DELETE FROM stg.week_calendar passerade hela verify.sql grönt — ett värre
+--     tillstånd än den tomma crack_weekly som redan har ett prov.
+SELECT CASE WHEN (SELECT count(*) FROM stg.week_calendar) = 0
+  THEN error('verify 1b: stg.week_calendar is empty - every check below it is vacuous')
+END AS "1b week calendar is not empty";
+
+-- 1c. Samma sak för dagsaxeln.
+--
+--     En tom stg.day_axis gör check 15 tom (noll grupper har count > 1) och
+--     check 14 tom (recomputed har noll rader), och check 16 är grindad på
+--     strict — ett fixtures-bygge med tom dagsaxel passerade alltså hela
+--     verify.sql. Export-check 8/18a tar den, men först efter att filen
+--     skrivits.
+SELECT CASE WHEN (SELECT count(*) FROM stg.day_axis) = 0
+  THEN error('verify 1c: stg.day_axis is empty - checks 14, 15 and 16 are vacuous')
+END AS "1c daily axis is not empty";
+
+-- 1d. build_meta har en användbar min_week_obs.
+--
+--     Guarden i 00_schema.sql stänger "variabeln var inte satt vid bygget", inte
+--     "NULL vid kontrolltillfället". Varje läsare gör numera
+--     (SELECT min_week_obs FROM stg.build_meta), en okorrelerad skalär delfråga
+--     som ger NULL om tabellen är tom — och då är felläget exakt det som skulle
+--     tas bort: n >= NULL är NULL, check 13 och 14 får tomma mängder och
+--     rapporterar grönt. strict är av samma skäl coalesce:ad på sina två
+--     läsplatser; det här är den andra kolumnen i samma tabell.
+SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta WHERE min_week_obs IS NOT NULL) <> 1
+  THEN error('verify 1d: stg.build_meta has no usable min_week_obs - checks 13 and 14 are vacuous')
+END AS "1d build_meta usable";
+
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every
 --    positional values[] array in the published JSON against every other.
 SELECT CASE WHEN count(*) > 0
@@ -122,21 +177,154 @@ FROM (
 --    Check 7b (EU retail) is NOT gated — the Oil Bulletin is fetched live in
 --    every mode, so a workbook that still parses but has stopped being updated
 --    must fail CI rather than sail through it.
+--
+--    Slacken för crack är 21 dagar, inte 14 som för retail, och det är en följd
+--    av coverage-regeln nedan: EIA ligger ~8 dagar efter, så den sista
+--    kalenderveckan har regelmässigt för få handelsdagar och publiceras som
+--    NULL. Ett normalläge är alltså redan en veckas glapp, och 14 dagar hade
+--    fällt bygget på en enda sen EIA-publicering. Dagsserien är stället där
+--    färskhet faktiskt mäts — se verify 16.
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.crack_weekly
-                             WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 14
+                             WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 21
   THEN error(format('verify 7: crack data stale - calendar ends {}, last observation {}',
-                    (SELECT max(week_start) FROM stg.week_calendar),
-                    (SELECT max(week_start) FROM stg.crack_weekly WHERE usd_per_bbl IS NOT NULL)))
+                    coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                    coalesce((SELECT max(week_start) FROM stg.crack_weekly
+                              WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
 END AS "7 crack data fresh"
 ;
 
 SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly), DATE '1900-01-01') > 14
   THEN error(format('verify 7b: EU retail data stale - calendar ends {}, last observation {}',
-                    (SELECT max(week_start) FROM stg.week_calendar),
-                    (SELECT max(week_start) FROM stg.retail_eu_weekly)))
+                    coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                    coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly)::VARCHAR, 'none')))
 END AS "7b EU retail data fresh"
+;
+
+-- ---------------------------------------------------------------------------
+-- 13. Ingen publicerad veckopunkt får vila på för få handelsdagar.
+--
+--     Räknas om ur stg.spot_daily, inte ur den GROUP BY som byggde raden. Det
+--     är hela skillnaden mellan en kontroll och en tautologi: filtrerar man i
+--     40_cracks.sql OCH kontrollerar samma filter här kan kontrollen aldrig
+--     fälla, vilket den här pipelinen redan råkat ut för tre gånger.
+--
+--     Bakgrund: veckan 2026-08-10 publicerades som 86,28 = (84,16 + 88,39) / 2,
+--     två av fem handelsdagar, mitt under en brant uppgång.
+-- ---------------------------------------------------------------------------
+WITH published AS (
+  SELECT week_start, 'EER_EPD2DXL0_PF4_Y35NY_DPG' AS series_id, ulsd_usd_per_gal AS value
+  FROM stg.legs_weekly
+  UNION ALL SELECT week_start, 'RBRTE', brent_usd_per_bbl FROM stg.legs_weekly
+  UNION ALL SELECT week_start, 'RWTC',  wti_usd_per_bbl   FROM stg.legs_weekly
+),
+coverage AS (
+  SELECT date_trunc('week', obs_date)::DATE AS week_start, series_id, count(value) AS n
+  FROM stg.spot_daily GROUP BY 1, 2
+),
+thin AS (
+  SELECT p.week_start, p.series_id, coalesce(c.n, 0) AS n
+  FROM published p
+  LEFT JOIN coverage c USING (week_start, series_id)
+  WHERE p.value IS NOT NULL
+    AND coalesce(c.n, 0) < (SELECT min_week_obs FROM stg.build_meta)
+)
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 13: {} published weekly leg(s) rest on fewer than {} daily '
+                    'observations (first: {} {}, {} obs) - a partial week must publish as NULL',
+                    count(*), coalesce((SELECT min_week_obs FROM stg.build_meta)::VARCHAR, 'unset'),
+                    coalesce(min(week_start)::VARCHAR, 'none'),
+                    coalesce((SELECT series_id FROM thin ORDER BY week_start, series_id LIMIT 1), 'none'),
+                    coalesce((SELECT n FROM thin ORDER BY week_start, series_id LIMIT 1)::VARCHAR, 'none')))
+END AS "13 weekly legs have enough daily coverage"
+FROM thin;
+
+-- ---------------------------------------------------------------------------
+-- 14. 7-dagarslinjalen är vad den utger sig för.
+--
+--     Räknas om med en korrelerad delfråga i stället för med samma fönster som
+--     byggde tabellen — annars vore det samma uttryck jämfört med sig självt.
+--     Både värdet och tröskeln prövas: en punkt som borde saknas men finns är
+--     lika fel som en som finns men är fel.
+-- ---------------------------------------------------------------------------
+--     FULL OUTER JOIN, inte FROM crack_daily_ma: drevs jämförelsen från
+--     ma-tabellen kunde en rad som saknas DÄR aldrig jämföras mot något, och
+--     exporten kryssjoinar ändå dagsaxeln så att den blir en null vid oförändrad
+--     arraylängd — check 17 ser den alltså inte heller. Nu fälls både en punkt
+--     som saknas och en föräldralös punkt utan motsvarande dag.
+WITH recomputed AS (
+  SELECT
+    coalesce(d.obs_date, m.obs_date)     AS obs_date,
+    coalesce(d.series_key, m.series_key) AS series_key,
+    m.usd_per_bbl                        AS published,
+    d.obs_date IS NULL                   AS orphan,
+    (SELECT AVG(x.usd_per_bbl) FROM stg.crack_daily x
+      WHERE x.series_key = coalesce(d.series_key, m.series_key)
+        AND x.obs_date > coalesce(d.obs_date, m.obs_date) - INTERVAL 7 DAY
+        AND x.obs_date <= coalesce(d.obs_date, m.obs_date))  AS expected,
+    (SELECT count(x.usd_per_bbl) FROM stg.crack_daily x
+      WHERE x.series_key = coalesce(d.series_key, m.series_key)
+        AND x.obs_date > coalesce(d.obs_date, m.obs_date) - INTERVAL 7 DAY
+        AND x.obs_date <= coalesce(d.obs_date, m.obs_date))  AS n
+  FROM stg.crack_daily d
+  FULL OUTER JOIN stg.crack_daily_ma m USING (obs_date, series_key)
+),
+bad AS (
+  SELECT * FROM recomputed
+  WHERE orphan
+     OR (n >= (SELECT min_week_obs FROM stg.build_meta)
+         AND (published IS NULL OR abs(published - expected) > 1e-9))
+     OR (n <  (SELECT min_week_obs FROM stg.build_meta) AND published IS NOT NULL)
+)
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 14: {} of {} MA7 point(s) do not equal the trailing 7-day mean '
+                    '(first: {} {}, published {}, expected {}, {} obs in window)',
+                    count(*), (SELECT count(*) FROM recomputed),
+                    coalesce((SELECT obs_date   FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'none'),
+                    coalesce((SELECT series_key FROM bad ORDER BY obs_date, series_key LIMIT 1), 'none'),
+                    -- published och expected är NULL i just de fall kontrollen
+                    -- finns för: en punkt som inte borde finnas, och en serie
+                    -- utan observationer i fönstret.
+                    coalesce((SELECT round(published, 4) FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'null'),
+                    coalesce((SELECT round(expected, 4)  FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'null'),
+                    coalesce((SELECT n FROM bad ORDER BY obs_date, series_key LIMIT 1)::VARCHAR, 'none')))
+END AS "14 MA7 equals the trailing 7-day mean"
+FROM bad;
+
+-- ---------------------------------------------------------------------------
+-- 15. Dagsaxeln är strikt stigande och utan dubbletter.
+--
+--     Den är inte en kalender utan en lista över observerade datum, så check 1:s
+--     kontinuitetsresonemang gäller inte. Det som däremot måste hålla är att en
+--     dag förekommer en gång: en dubblett skulle förskjuta varje values[] mot
+--     axeln och rita hela diagrammet fel utan att något ser tomt ut.
+-- ---------------------------------------------------------------------------
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 15: {} duplicate date(s) on the daily axis', count(*)))
+END AS "15 daily axis is unique"
+FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
+
+-- ---------------------------------------------------------------------------
+-- 16. Dagsdatan är färsk.
+--
+--     Här, inte i check 7, är färskheten meningsfull: dagsserien slutar på EIA:s
+--     sista publicerade dag utan utjämning emellan. EIA ligger normalt ~8 dagar
+--     efter, så 20 dagar ger gott om marginal för en helg plus en sen
+--     publicering, men fäller en källa som slutat leverera.
+--
+--     Grindad på strict av samma skäl som check 7: fixtures är en fryst
+--     ögonblicksbild.
+-- ---------------------------------------------------------------------------
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
+                 AND current_date - coalesce((SELECT max(obs_date) FROM stg.crack_daily
+                                              WHERE usd_per_bbl IS NOT NULL),
+                                             DATE '1900-01-01') > 20
+  THEN error(format('verify 16: daily crack data stale - today {}, last observation {}',
+                    current_date::VARCHAR,
+                    coalesce((SELECT max(obs_date) FROM stg.crack_daily
+                              WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
+END AS "16 daily crack data fresh"
 ;
 
 SELECT 'alla invarianter gröna' AS verify;

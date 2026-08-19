@@ -156,6 +156,85 @@ object Charts:
       )
     )
 
+  // -- crack: dagsläge med 7-dagarslinjal -----------------------------------
+
+  /**
+   * Dagsupplösning. Dagslinjen ritas tunn och blek, linjalen ovanpå den i full
+   * styrka: poängen är att bruset ska synas MEN inte läsas som trend, och en
+   * lika tjock dagslinje hade gjort linjalen meningslös.
+   *
+   * Axeln är observationsdatum. Etiketterna glesas ut av ECharts själv; att
+   * tvinga fram en per punkt ger 1 181 oläsliga datum.
+   */
+  def crackDaily(d: Data.DailyCracks, region: String, ruler: Boolean): js.Any =
+    val ss = d.spreads(region)
+
+    val daily = ss.zipWithIndex.map { (s, i) =>
+      val col = Spread(i % Spread.length)
+      obj(
+        name = s.label, `type` = "line",
+        showSymbol = false, connectNulls = false,
+        // Blek när linjalen är på, full styrka när den är av — annars vore
+        // dagsvyn utan linjal medvetet svårläst utan att något vunnits.
+        lineStyle = obj(width = if ruler then 0.9 else 1.6, color = col,
+                        opacity = if ruler then 0.45 else 1.0),
+        itemStyle = obj(color = col),
+        emphasis = obj(focus = "series"),
+        z = 2,
+        data = data(s.values)
+      ): js.Object
+    }
+
+    val rulers =
+      if !ruler then Vector.empty
+      else ss.zipWithIndex.flatMap { (s, i) =>
+        d.ma(s.key).map { m =>
+          obj(
+            name = m.label, `type` = "line",
+            showSymbol = false, connectNulls = false,
+            lineStyle = obj(width = 2.2, color = Spread(i % Spread.length)),
+            itemStyle = obj(color = Spread(i % Spread.length)),
+            emphasis = obj(focus = "series"),
+            z = 3,
+            data = data(m.values)
+          ): js.Object
+        }
+      }
+
+    obj(
+      grid = gridBoxLegend,
+      legend = legendBox,
+      tooltip = obj(
+        trigger = "axis", confine = true, position = tooltipPos,
+        textStyle = obj(fontSize = 12),
+        axisPointer = obj(`type` = "line", lineStyle = obj(color = Grid)),
+        formatter = ((ps: js.Array[js.Dynamic]) =>
+          val head = ps.headOption.map(p => s"<b>${p.axisValue}</b>").getOrElse("")
+          val rows = ps.toVector.map { p =>
+            val v = p.value
+            val txt = if v == null || js.isUndefined(v) then "–"
+                      else s"${fixed(v.asInstanceOf[Double], 2)} USD/bbl"
+            s"${p.marker}${p.seriesName}: $txt"
+          }
+          (head +: rows).mkString("<br>")
+        ): js.Function1[js.Array[js.Dynamic], String]
+      ),
+      xAxis = axisX(d.days),
+      yAxis = axisY("USD/bbl"),
+      // Öppnar på de sista ~120 handelsdagarna. Hela serien på en gång gör
+      // dagsupplösningen till en suddig remsa, och den som vill se 2022 kan
+      // dra i reglaget — men den som kom hit för att jämföra mot en kurs i dag
+      // ska slippa göra det först.
+      dataZoom = js.Array(
+        obj(`type` = "inside", startValue = math.max(0, d.days.length - 120)): js.Object,
+        obj(`type` = "slider", height = 16, bottom = 8, borderColor = Grid,
+            startValue = math.max(0, d.days.length - 120),
+            fillerColor = "rgba(54,102,204,0.10)", handleStyle = obj(color = Ref),
+            textStyle = obj(color = Faint, fontSize = 10)): js.Object
+      ),
+      series = js.Array((daily ++ rulers)*)
+    )
+
   // -- crack: tröskelläge ("mountain") -------------------------------------
 
   /**

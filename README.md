@@ -16,7 +16,7 @@ draws it.
 
 | Chart | Shows |
 |---|---|
-| Diesel crack spreads | NYH ULSD against Brent and WTI, weekly since 2022, with a threshold ("mountain") view that fills green above and red below a breakeven you set. NW Europe needs ICE gasoil — see below. |
+| Diesel crack spreads | NYH ULSD against Brent and WTI since 2022, weekly or daily. Weekly has a threshold ("mountain") view that fills green above and red below a breakeven you set; daily has an optional 7-day ruler. NW Europe needs ICE gasoil — see below. |
 | Retail diesel and petrol | Pump prices per litre for all 27 EU members plus the USA, Sweden emphasised. Toggles for fuel, tax treatment, and EUR/USD/SEK. |
 | US regional spread | Nine states for petrol and five PADD regions for diesel, against the bold national average. California against Texas is roughly a 50% difference on the same fuel, and most of it is tax. |
 | Rockets and feathers | Crude benchmarks against the US pump on a dual axis — retail chases a crude spike up in weeks and drifts back down over months. |
@@ -25,7 +25,7 @@ draws it.
 
 | Source | Series | Licence |
 |---|---|---|
-| [EIA Open Data v2](https://www.eia.gov/opendata/) | NYH ULSD spot `EER_EPD2DXL0_PF4_Y35NY_DPG`, Brent `RBRTE`, WTI `RWTC`, US retail petrol `EMM_EPMR_PTE_NUS_DPG`, US retail diesel `EMD_EPD2D_PTE_NUS_DPG`, nine state petrol series `EMM_EPMR_PTE_S**_DPG`, five PADD diesel series `EMD_EPD2D_PTE_R**_DPG` | US Government work — public domain. A free API key is required. |
+| [EIA Open Data v2](https://www.eia.gov/opendata/) | NYH ULSD spot `EER_EPD2DXL0_PF4_Y35NY_DPG`, Brent `RBRTE`, WTI `RWTC` (daily, published with roughly a week's lag), US retail petrol `EMM_EPMR_PTE_NUS_DPG`, US retail diesel `EMD_EPD2D_PTE_NUS_DPG`, nine state petrol series `EMM_EPMR_PTE_S**_DPG`, five PADD diesel series `EMD_EPD2D_PTE_R**_DPG` | US Government work — public domain. A free API key is required. |
 | [EU Weekly Oil Bulletin](https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en) | Euro-super 95 and gas oil automobile, with and without taxes, all member states | European Commission open data, CC BY 4.0. Attribution required. |
 | [ECB SDMX](https://data.ecb.europa.eu/) | `EXR.D.USD.EUR.SP00.A`, `EXR.D.SEK.EUR.SP00.A` | ECB open data. Attribution required. |
 | ICE Low Sulphur Gasoil | Futures settlement | **Not redistributable.** See below. |
@@ -67,10 +67,26 @@ states it.
 
 Other conventions:
 
-- **Everything is weekly**, bucketed to ISO weeks and keyed to that week's Monday.
-  Sources publish on different days; joining on the week key rather than the
-  publication date makes cross-source comparison exact. The current, incomplete
+- **Cross-source comparison is weekly**, bucketed to ISO weeks and keyed to that
+  week's Monday. Sources publish on different days; joining on the week key rather
+  than the publication date makes the comparison exact. The current, incomplete
   week is excluded.
+- **A weekly point needs at least three trading days.** Below that the week
+  publishes as null and the chart draws a gap. Without this rule the week of
+  2026-08-10 was published as 86.28 USD/bbl — the mean of Monday and Tuesday
+  alone, `(84.16 + 88.39) / 2` — during a steep climb, and looked exactly like a
+  complete week. Three rather than five, so a holiday-shortened week survives.
+- **The crack is also published daily**, in `cracks_daily.json`, on its own
+  observation-date axis. That axis is *not* interchangeable with the weekly one
+  and nothing may index between them. The optional 7-day ruler is the unweighted
+  mean of the trailing seven **calendar** days — one trading week in steady state,
+  shortening honestly over a holiday, where a seven-*observation* window would
+  quietly reach nine calendar days back and still call itself "7-day".
+- **EIA spot runs about a week behind.** Nothing in the pipeline or its schedule
+  changes that; it is a property of the source. `meta.generated` says when the
+  pipeline ran and nothing about how old the data is, so the daily view prints the
+  last observation date and the lag beside it rather than letting the two be
+  confused.
 - **Oil Bulletin prices are already in EUR** per 1000 litres for every country,
   and are stored as EUR/L. The workbook's `{CC}_exchange_rate` columns are *not*
   applied — doing so would divide Swedish prices by eleven. An invariant check

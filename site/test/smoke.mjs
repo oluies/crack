@@ -21,6 +21,7 @@ const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json' };
 
 for (const required of ['public/app.js', 'public/data/cracks.json',
+                        'public/data/cracks_daily.json',
                         'public/data/retail.json', 'public/data/fx.json',
                         'public/data/usregions.json']) {
   if (!fs.existsSync(path.join(SITE, required))) {
@@ -81,7 +82,9 @@ check(doc.querySelectorAll('.failed').length === 0,
 check(doc.querySelectorAll('.chart').length === 4, 'four charts mounted');
 check(doc.querySelectorAll('canvas').length === 4, 'four ECharts canvases');
 check(doc.querySelectorAll('.prov').length >= 4, 'provenance under every chart');
-check(doc.querySelectorAll('.group button').length === 18, 'all toggles present');
+// 20 = de 18 tidigare plus Scale (Weekly/Daily). Linjalens On/Off finns bara i
+// dagsläget och räknas därför inte här — den kontrolleras när den ska dyka upp.
+check(doc.querySelectorAll('.group button').length === 20, 'all toggles present');
 check(errors.length === 0, 'no errors on first render: ' + errors.slice(0, 2).join(' | '));
 
 const click = (label, scope) => {
@@ -109,6 +112,35 @@ await step('NW Europe', 1);
 await step('Threshold', 1);
 await step('US (NYH)', 0);
 await step('NYH ULSD – WTI', 0);
+// --- dagsläget och 7-dagarslinjalen ---------------------------------------
+//
+// Serieantalet är hela poängen: linjalen måste lägga TILL en linje per spread,
+// inte ersätta dagslinjen. Ett reglage som bara byter tjocklek på samma serie
+// hade sett rätt ut i ett skärmklipp och varit fel.
+const crackSeries = () =>
+  echarts.getInstanceByDom(doc.querySelector('#cracks .chart')).getOption().series.length;
+
+await step('Daily', 0);
+check(crackSeries() === 4, `daily+ruler draws 2 spreads and 2 rulers (got ${crackSeries()})`);
+check(/Last EIA observation \d{4}-\d{2}-\d{2}/.test(doc.querySelector('#cracks').textContent),
+      'daily view states the last observation date');
+check(/\d+ days before this refresh/.test(doc.querySelector('#cracks').textContent),
+      'daily view states the lag in days');
+
+await step('Off', 0, '#cracks');
+check(crackSeries() === 2, `ruler off leaves the daily lines only (got ${crackSeries()})`);
+check(!/7-day/.test(JSON.stringify(
+        echarts.getInstanceByDom(doc.querySelector('#cracks .chart')).getOption().series
+          .map(x => x.name))),
+      'ruler off removes the 7d series, not just its colour');
+
+await step('On', 0, '#cracks');
+await step('NW Europe', 1);          // saknar ICE-data i dagsläget också
+await step('US (NYH)', 0);
+await step('Weekly', 0);
+check(!doc.querySelector('#cracks').textContent.includes('Last EIA observation'),
+      'the lag line belongs to the daily view only');
+
 await step('Petrol (E95)');
 
 // Utan skatt saknar USA serie — EIA publicerar bara pumppriset, som redan

@@ -17,27 +17,33 @@ set -euo pipefail
 
 ROOT="$1"; OUT_DIR="$2"; EXPORT_SQL="$3"
 
-# Egen diagnos: utan detta blir en felstavad sökväg tre misslyckade grep och
-# meddelandet "skriver inte till ..." — vilket pekar på filens innehåll i
-# stället för på att filen inte finns.
-[ -f "$EXPORT_SQL" ] || { echo "FEL: $EXPORT_SQL finns inte" >&2; exit 1; }
+# Ingen egen filkontroll här: export-targets.sh vägrar redan en saknad fil med
+# den diagnosen innan någon grep körs. En andra, ordagrant likadan kopia hade
+# behövt hållas i synk för hand — precis den drift som fick utvinningen att
+# flytta till ett delat skript.
 
 # COPY ... TO paths are relative to the process CWD, which run.sh sets to the
 # repo root; out_dir is absolute. Compare them in the same terms.
 REL="${OUT_DIR#"$ROOT"/}"
 
-missing=""
-for f in cracks retail fx usregions; do
-  # -F: $REL är en sökväg, inte ett reguljärt uttryck. Ett '[' i den skulle ge
-  # ett parse-fel och fälla guarden med fel förklaring; punkten i .json skulle
-  # tyst matcha vilket tecken som helst.
-  grep -qF "TO '$REL/$f.json'" "$EXPORT_SQL" || missing="$missing $f.json"
+# Målen läses UR filen i stället för ur en lista här, och utvinningen ligger i
+# ett eget skript som deploy-grinden i refresh.yml delar. En hårdkodad lista är
+# tyst för precis det fel som är lättast att göra — en ny COPY-fil — och två
+# handhållna kopior av samma lista hann gå isär innan någon märkte det.
+TARGETS=$("$(dirname "$0")/export-targets.sh" "$EXPORT_SQL")
+
+wrong=""
+for t in $TARGETS; do
+  case "$t" in
+    "$REL"/*) ;;
+    *) wrong="$wrong $t" ;;
+  esac
 done
 
-if [ -n "$missing" ]; then
-  echo "FEL: $(basename "$EXPORT_SQL") skriver inte till '$REL/' för:$missing" >&2
+if [ -n "$wrong" ]; then
+  echo "FEL: $(basename "$EXPORT_SQL") skriver utanför '$REL/':$wrong" >&2
   echo "     Verifieringen läser ur $OUT_DIR, så exporten skulle kontrolleras mot" >&2
   echo "     filer den inte skrev. Ändra COPY-målen, eller OUT_DIR i run.sh, så att" >&2
-  echo "     de tre filerna skrivs och läses på samma plats." >&2
+  echo "     filerna skrivs och läses på samma plats." >&2
   exit 1
 fi

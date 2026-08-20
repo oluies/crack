@@ -648,6 +648,16 @@ verify_only_case() {  # $1 = namn, $2 = stämpel i filerna, $3 = "full"|"degrade
   out=$(CRACK_DB="$TMP/t.duckdb" CRACK_OUT_DIR="$TMP/data" \
         pipeline/run.sh --verify-only 2>&1); rc=$?
 
+  # Den omdirigerade körningen får inte röra det riktiga trädet. Preamblen
+  # skrevs tidigare alltid i data/work och stämplade då out_dir mot en
+  # riggkatalog som försvinner med sviten — filen lovar högst upp att bara
+  # arbeta på kopior, och det ska gälla även när run.sh anropas härifrån.
+  if [ -f "$ROOT/data/work/preamble.sql" ] \
+     && grep -qF "$TMP" "$ROOT/data/work/preamble.sql"; then
+    printf 'FAIL  %-44s skrev riggens sökväg i data/work/preamble.sql\n' "$name"
+    fail=$((fail+1)); return 0
+  fi
+
   if [ $rc -ne 0 ]; then
     printf 'FAIL  %-44s exit %s\n      %s\n' "$name" "$rc" \
       "$(printf '%s' "$out" | grep -m1 -E 'FEL|Error' || printf '%s' "$out" | tail -1)"
@@ -673,6 +683,20 @@ verify_only_case() {  # $1 = namn, $2 = stämpel i filerna, $3 = "full"|"degrade
   fi
   return 0
 }
+
+# KÄND LUCKA, medvetet lämnad: att CRACK_DB/CRACK_OUT_DIR bara gäller
+# verify-läget har inget prov.
+#
+# Varje annat läge exporterar, så det enda sättet att pröva restriktionen
+# beteendemässigt är att köra en exporterande körning under riggen — och den
+# skriver om site/public/data, vilket är exakt den incident repot redan haft
+# (syntetisk data committad och publicerad). Ett prov som återställer efteråt
+# återskapar hazarden för att bevisa en trerading.
+#
+# Det som finns i stället: run.sh säger ifrån när variablerna sätts i ett läge
+# som ignorerar dem, så en borttagen restriktion syns i utdatan. Skriv inte ett
+# prov här som bara ser ut att täcka det — en kontroll som inte kan fälla är
+# värre än ingen, vilket är hela filens tes.
 
 # $SYNTHETIC hör ihop med databasen; motsatsen gör det inte.
 if [ "$SYNTHETIC" = "true" ]; then VO_OTHER=false; else VO_OTHER=true; fi

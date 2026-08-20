@@ -13,6 +13,12 @@
 #                                   published files come from different runs, so
 #                                   only the database invariants are re-run)
 #
+# CRACK_DB and CRACK_OUT_DIR redirect --verify-only at another database and
+# published tree. They exist for pipeline/test/negative.sh, which uses them to
+# drive both halves of the verify dispatch against copies, and are ignored in
+# every other mode: those modes export, and 50_export.sql's COPY targets are
+# string literals that cannot follow.
+#
 # Requires: duckdb 1.5+, curl. EIA_API_KEY from the environment or .env.
 
 set -euo pipefail
@@ -72,6 +78,18 @@ OUT_DIR_PINNED=true
 if [ "$MODE" = "verify" ]; then
   if [ -n "${CRACK_DB:-}" ]; then DB="$CRACK_DB"; fi
   if [ -n "${CRACK_OUT_DIR:-}" ]; then OUT_DIR="$CRACK_OUT_DIR"; OUT_DIR_PINNED=false; fi
+fi
+
+# Sägs ut, inte bara gjort: en omdirigerad körning som ser ut som en vanlig är
+# svårare att felsöka än den är att åstadkomma. Varnar också den som satt
+# variablerna i ett läge där de ignoreras.
+if [ -n "${CRACK_DB:-}${CRACK_OUT_DIR:-}" ]; then
+  if [ "$MODE" = "verify" ]; then
+    say "omdirigerad: db=$DB out_dir=$OUT_DIR"
+  else
+    say "VARNING: CRACK_DB/CRACK_OUT_DIR ignoreras i läget '$MODE' — de gäller"
+    say "         bara --verify-only, som inte exporterar något."
+  fi
 fi
 
 mkdir -p "$WORK" "$OUT_DIR" data/manual
@@ -154,7 +172,15 @@ OB_PATH="$WORK/$OB_FILE"
 STRICT=true
 if [ "$MODE" = "fixtures" ]; then STRICT=false; fi
 
-cat > "$WORK/preamble.sql" <<SQL
+# Beside the database, not always in $WORK. They are the same directory for every
+# ordinary run; they differ only when --verify-only has been pointed at another
+# pair, and then writing into the real data/work would leave a preamble stamping
+# out_dir at a scratch directory that no longer exists — a trap for the next
+# person reproducing a failure the way run.sh itself does it, and a race with any
+# concurrent build over one file.
+PREAMBLE="$(dirname "$DB")/preamble.sql"
+
+cat > "$PREAMBLE" <<SQL
 .bail on
 SET VARIABLE work_dir   = '$WORK';
 SET VARIABLE manual_dir = '$ROOT/data/manual';
@@ -193,7 +219,7 @@ if [ "$MODE" = "verify" ]; then
   case "$pair_rc" in
     0)
       say "kör invarianter"
-      duckdb "$DB" -f "$WORK/preamble.sql" \
+      duckdb "$DB" -f "$PREAMBLE" \
         -f pipeline/verify.sql -f pipeline/60_verify_export.sql
       exit $?
       ;;
@@ -202,7 +228,7 @@ if [ "$MODE" = "verify" ]; then
       say "med filer den inte skrev. Databasens egna invarianter körs ändå."
       say "Behöver du även export-invarianterna: kör om pipeline/run.sh med en"
       say "riktig EIA_API_KEY, så att databasen och filerna kommer ur samma körning."
-      duckdb "$DB" -f "$WORK/preamble.sql" -f pipeline/verify.sql
+      duckdb "$DB" -f "$PREAMBLE" -f pipeline/verify.sql
       exit $?
       ;;
     *)
@@ -219,7 +245,7 @@ cp "$OUT_DIR"/*.json "$WORK/prev/" 2>/dev/null || true
 rm -f "$DB"
 say "bygger $DB"
 duckdb "$DB" \
-  -f "$WORK/preamble.sql" \
+  -f "$PREAMBLE" \
   -f pipeline/00_schema.sql \
   -f pipeline/10_eia.sql \
   -f pipeline/15_eia_regions.sql \

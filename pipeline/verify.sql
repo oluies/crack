@@ -17,7 +17,9 @@
 -- serie utan observationer i fönstret, där expected var NULL.
 --
 -- Samma sak gäller VILLKORET, inte bara meddelandet: NULL > 21 är NULL, och
--- CASE faller igenom till grönt. Därför kommer check 1b först av allt.
+-- CASE faller igenom till grönt. Därför kommer check 1b först av
+-- DATAkontrollerna — schemakontrollen 1a ligger före den, och måste göra det:
+-- 1b läser en tabell som en gammal databas kanske inte har.
 --
 -- Kontroll 1–6 interpolerar avsiktligt utan coalesce. Deras uttryck kan inte
 -- vara NULL när count(*) > 0: nycklarna kommer från kolumner som filtreras
@@ -26,9 +28,57 @@
 -- en egenskap hos format() — flyttas ett filter måste de coalesce:as.
 -- ---------------------------------------------------------------------------
 
+-- 1a. Databasens schema är från den här versionen av pipelinen.
+--
+--     Först av allt, och medvetet via information_schema i stället för genom att
+--     röra tabellerna: en databas byggd av en äldre pipeline får annars
+--     kontrollerna nedan att inte ens BINDA. Saknas kolumnen built_on svarar
+--     DuckDB "Binder Error: Referenced column built_on not found", och saknas
+--     hela stg.day_axis blir det "Catalog Error: Table with name day_axis does
+--     not exist" — bägge pekar på ett objekt i stället för på orsaken, flera
+--     steg från den. 1c och 1d kan inte fånga det, eftersom de är två av
+--     satserna som slutar binda.
+--
+--     --verify-only är precis kommandot man riktar mot en äldre databas, så det
+--     här är inte ett teoretiskt läge. Samma resonemang som export-check 8, som
+--     sonderar rå JSON först av just det skälet.
+--
+--     Listan räknas upp för hand med flit. Härledd ur databasen hade den bara
+--     beskrivit vad som råkar finnas; det som ska stå här är vad den här filen
+--     kräver för att kunna köras alls.
+WITH required_tables(t) AS (
+  VALUES ('build_meta'), ('week_calendar'), ('day_axis'), ('eu27'),
+         ('spot_daily'), ('legs_weekly'), ('crack_weekly'),
+         ('crack_daily'), ('crack_daily_ma'),
+         ('ob_parsed'), ('retail_eu_weekly'), ('retail_us_raw'), ('fx_weekly')
+),
+required_columns(t, c) AS (
+  VALUES ('build_meta', 'strict'), ('build_meta', 'min_week_obs'), ('build_meta', 'built_on')
+),
+missing AS (
+  SELECT 'table stg.' || t AS what FROM required_tables
+  WHERE t NOT IN (SELECT table_name FROM information_schema.tables
+                  WHERE table_schema = 'stg')
+  UNION ALL
+  -- Kolumnerna prövas bara på tabeller som finns, annars rapporteras en saknad
+  -- tabell tre gånger och den verkliga listan drunknar.
+  SELECT 'column stg.' || t || '.' || c FROM required_columns
+  WHERE t IN (SELECT table_name FROM information_schema.tables WHERE table_schema = 'stg')
+    AND (t, c) NOT IN (SELECT table_name, column_name FROM information_schema.columns
+                       WHERE table_schema = 'stg')
+)
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 1a: this database was built by an older pipeline - missing {}. '
+                    'Rebuild it with pipeline/run.sh; --verify-only cannot upgrade an '
+                    'existing database.',
+                    coalesce(string_agg(what, ', ' ORDER BY what), 'unknown')))
+END AS "1a database has this pipeline's schema"
+FROM missing;
+
 -- 1b. Veckoaxeln finns över huvud taget.
 --
---     Först, för att allt nedanför vilar på den. En tom stg.week_calendar gör
+--     Först av datakontrollerna, för att allt nedanför vilar på den. En tom
+--     stg.week_calendar gör
 --     inte bara meddelanden NULL utan villkoren också: check 1 räknar luckor
 --     över noll rader, check 6 kryssjoinar en tom kalender till noll rader, och
 --     staleness-uttrycket blir NULL - DATE '1900-01-01' > 21, alltså NULL. Ett
@@ -58,9 +108,35 @@ END AS "1c daily axis is not empty";
 --     tas bort: n >= NULL är NULL, check 13 och 14 får tomma mängder och
 --     rapporterar grönt. strict är av samma skäl coalesce:ad på sina två
 --     läsplatser; det här är den andra kolumnen i samma tabell.
-SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta WHERE min_week_obs IS NOT NULL) <> 1
-  THEN error('verify 1d: stg.build_meta has no usable min_week_obs - checks 13 and 14 are vacuous')
+SELECT CASE WHEN (SELECT count(*) FROM stg.build_meta
+                   WHERE min_week_obs IS NOT NULL AND built_on IS NOT NULL) <> 1
+  THEN error('verify 1d: stg.build_meta has no usable min_week_obs/built_on - checks 1e, 13 and 14 are vacuous')
 END AS "1d build_meta usable";
+
+-- 1e. Axelns övre gräns ligger i rätt intervall.
+--
+--     Sedan 25_calendar.sql låter en publicerad enkätvecka dra ut axeln beror
+--     gränsen på uppströmsdata, inte bara på klockan. Två fel blir då möjliga
+--     som inte var det förut: ett trasigt datum uppströms kan skjuta axeln in i
+--     framtiden, och en tom enkättabell kan låta den falla under den sista
+--     avslutade veckan. Båda ger en axel som ser normal ut.
+--     Gränserna prövas mot stg.build_meta.built_on, inte mot current_date:
+--     --verify-only kör de här invarianterna mot en databas som byggdes en
+--     annan dag, och mot dagens datum hade en helt korrekt axel fällts så fort
+--     kalendern hunnit vidare en vecka. Att datan är gammal är en annan fråga
+--     och har egna kontroller (7, 7b, 16).
+SELECT CASE
+  WHEN (SELECT max(week_start) FROM stg.week_calendar)
+       > date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE
+    THEN error(format('verify 1e: the week axis runs into the future - ends {}, build week {}',
+                      coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                      coalesce(date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE::VARCHAR, 'none')))
+  WHEN (SELECT max(week_start) FROM stg.week_calendar)
+       < (date_trunc('week', (SELECT built_on FROM stg.build_meta)) - INTERVAL 7 DAY)::DATE
+    THEN error(format('verify 1e: the week axis stops before the last complete week - ends {}, expected at least {}',
+                      coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                      coalesce((date_trunc('week', (SELECT built_on FROM stg.build_meta)) - INTERVAL 7 DAY)::DATE::VARCHAR, 'none')))
+END AS "1e week axis ends in range";
 
 -- 1. The week axis is contiguous Mondays. A hole here silently misaligns every
 --    positional values[] array in the published JSON against every other.
@@ -172,7 +248,8 @@ FROM (
 --    call it data. Two weeks of slack absorbs normal publication lag.
 --
 --    Check 7 (crack) is gated on strict: under --fixtures the EIA half is a
---    frozen synthetic snapshot while week_calendar tracks current_date, so it
+--    frozen synthetic snapshot while week_calendar follows the build date
+--    (stg.build_meta.built_on), which advances with every run, so it
 --    would start failing every CI run weeks after the fixtures were generated.
 --    Check 7b (EU retail) is NOT gated — the Oil Bulletin is fetched live in
 --    every mode, so a workbook that still parses but has stopped being updated

@@ -74,6 +74,14 @@ new w.Function(fs.readFileSync(path.join(SITE, 'public/app.js'), 'utf8')).call(w
 await new Promise(r => setTimeout(r, 3000));
 
 const doc = w.document;
+// Läses ur filen, inte ur sidan: annars jämförs sidan med sig själv.
+const retailJson = JSON.parse(fs.readFileSync(path.join(SITE, 'public/data/retail.json'), 'utf8'));
+const retailWeeksLast = (() => {
+  let last = null;
+  for (const s of retailJson.series)
+    s.values.forEach((v, i) => { if (v !== null && (last === null || i > last)) last = i; });
+  return retailJson.weeks[last];
+})();
 const fails = [];
 const check = (ok, msg) => { console.log(`${ok ? 'ok  ' : 'FAIL'}  ${msg}`); if (!ok) fails.push(msg); };
 
@@ -86,6 +94,34 @@ check(doc.querySelectorAll('.prov').length >= 4, 'provenance under every chart')
 // dagsläget och räknas därför inte här — den kontrolleras när den ska dyka upp.
 check(doc.querySelectorAll('.group button').length === 20, 'all toggles present');
 check(errors.length === 0, 'no errors on first render: ' + errors.slice(0, 2).join(' | '));
+
+// Rubrikstämpeln och täckningsraderna. Axelns slut duger inte som täckning —
+// veckoaxeln går till senaste retailvecka medan crack-serien slutar tidigare —
+// så det som kontrolleras är att de faktiskt kan skilja sig åt.
+const stamp = doc.querySelector('#datastamp');
+check(!!stamp && /Updated \d{4}-\d{2}-\d{2}/.test(stamp.textContent),
+      'header states when it was updated: ' + (stamp?.textContent ?? ''));
+check(!!stamp && /weekly \d{4}-\d{2}-\d{2} – \d{4}-\d{2}-\d{2}/.test(stamp.textContent),
+      'header states the weekly coverage');
+check(!!stamp && /daily to \d{4}-\d{2}-\d{2}/.test(stamp.textContent),
+      'header states the daily coverage');
+
+check(doc.querySelectorAll('.cover').length === 4 &&
+      [...doc.querySelectorAll('.cover')].every(p => /covers \d{4}-\d{2}-\d{2} – /.test(p.textContent)),
+      'all four charts state their own coverage');
+
+// Crack-täckningen MÅSTE kunna sluta tidigare än retail: EIA ligger efter och
+// min_week_obs tar bort ofullständiga veckor. Slutar de på samma vecka har
+// antingen datan råkat vara i fas eller så skrivs axeln ut i stället för
+// täckningen — det senare är buggen, så jämförelsen görs mot retailaxeln.
+const coverEnd = sel => {
+  const m = doc.querySelector(sel + ' .cover').textContent.match(/covers \S+ – (\S+)/);
+  return m && m[1];
+};
+check(coverEnd('#cracks') <= coverEnd('#retail'),
+      `crack coverage does not run past retail (${coverEnd('#cracks')} vs ${coverEnd('#retail')})`);
+check(coverEnd('#retail') === retailWeeksLast,
+      `retail coverage ends at its last published week (${coverEnd('#retail')} vs ${retailWeeksLast})`);
 
 const click = (label, scope) => {
   const root = scope ? doc.querySelector(scope) : doc;

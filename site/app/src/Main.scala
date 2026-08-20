@@ -74,11 +74,30 @@ object Main:
       }
     )
 
-  private def provenance(m: Data.Meta): HtmlElement =
+  /**
+   * `cover` är seriernas faktiska täckning, inte axelns. De två skiljer sig med
+   * flit: veckoaxeln går till senaste publicerade retailvecka medan crack-serien
+   * slutar tidigare, och att skriva ut axeln hade lovat data som inte finns.
+   */
+  private def provenance(m: Data.Meta, cover: Option[(String, String)]): HtmlElement =
     p(
-      cls := "prov",
+      // Två klasser: .prov är stilen, som den beskrivande brödtexten också
+      // använder, medan .cover pekar ut just härkomstraden. Utan det andra
+      // namnet kan varken CSS eller rökprovet skilja dem åt.
+      cls := "prov cover",
       s"Refreshed ${m.generated} · ",
+      cover.map((from, to) => span(s"covers $from – $to · ")),
       m.sources.map(s => span(a(href := s.url, target := "_blank", s.name), s" (${s.licence}) ")).toSeq
+    )
+
+  /** Rubrikens stämpel: när det kördes, och vad datan faktiskt sträcker sig över. */
+  private def datastamp(c: Data.Cracks, dc: Data.DailyCracks, r: Data.Retails): HtmlElement =
+    val weekly = Data.span(r.weeks, r.series.map(_.values))
+    val daily  = dc.lastObservation
+    span(
+      b("Updated "), c.meta.generated,
+      weekly.map((from, to) => span(s" · weekly $from – $to")),
+      daily.map(d => span(s" · daily to $d"))
     )
 
   // -- vyer -----------------------------------------------------------------
@@ -214,7 +233,15 @@ object Main:
             )
           )
       },
-      provenance(c.meta)
+      // Både skalan och regionen ingår i signalen: NWE saknar ICE-data och har
+      // alltså ingen täckning alls, vilket ska synas när man byter region och
+      // inte bara när man byter skala.
+      child <-- crackScale.signal.combineWith(crackRegion.signal).map { (sc, region) =>
+        val cover =
+          if sc == "daily" then Data.span(dc.days, dc.spreads(region).map(_.values))
+          else Data.span(c.weeks, c.spreads(region).map(_.values))
+        provenance(c.meta, cover)
+      }
     )
 
   private def retailSection(r: Data.Retails, fx: Data.Fx): HtmlElement =
@@ -266,7 +293,7 @@ object Main:
           .combineWith(retailTax.signal, retailCcy.signal, narrow.signal)
           .map((f, t, c, n) => Charts.retail(r, fx, f, t, c, n))
       ),
-      provenance(r.meta)
+      provenance(r.meta, Data.span(r.weeks, r.series.map(_.values)))
     )
 
   private def usSection(g: Data.Regions, r: Data.Retails, fx: Data.Fx): HtmlElement =
@@ -307,7 +334,7 @@ object Main:
       p(cls := "prov",
         "The US average is volume-weighted across the whole country, so it need not sit ",
         "midway between the lines drawn here."),
-      provenance(g.meta)
+      provenance(g.meta, Data.span(g.weeks, g.regions.map(_.values)))
     )
 
   private def dualSection(c: Data.Cracks, r: Data.Retails): HtmlElement =
@@ -320,7 +347,10 @@ object Main:
         "shows the asymmetry plainly."
       ),
       chartBox(Signal.fromValue(Charts.rocketsFeathers(c, r))),
-      provenance(c.meta)
+      // Täckningen är nivåserierna, inte spreadarna: diagrammet ritar Brent, WTI
+      // och ULSD mot pumppriset, och nivåerna omfattas inte av min_week_obs på
+      // samma sätt som en spread gör.
+      provenance(c.meta, Data.span(c.weeks, c.series.filter(_.kind == "level").map(_.values)))
     )
 
   private def notes: HtmlElement =
@@ -375,6 +405,10 @@ object Main:
         mount.innerHTML = ""
         render(mount, div(crackSection(c, dc), retailSection(r, fx),
                           usSection(g, r, fx), dualSection(c, r), notes))
+        // Egen monteringspunkt i rubriken. Den fylls först här, så en misslyckad
+        // hämtning lämnar den tom i stället för att visa ett datum utan data.
+        Option(dom.document.getElementById("datastamp"))
+          .foreach(el => render(el, datastamp(c, dc, r)))
         // Ankaret hinner inte finnas när webbläsaren försöker hoppa dit: appen
         // renderas först när de tre JSON-filerna kommit. Utan detta gör en delad
         // länk till #retail eller #rockets ingenting alls.

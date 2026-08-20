@@ -54,6 +54,12 @@ pipeline/run.sh --fixtures    # build from data/fixtures/; no API key needed
 pipeline/run.sh --verify-only # re-run assertions against the existing database
 ```
 
+After a `--fixtures` build, `--verify-only` re-runs **only the database
+invariants** and says so. The export invariants compare the database with the
+published files, and `--fixtures` restores `site/public/data` from git on purpose,
+so those two no longer come from the same run. It exits 0 rather than refusing —
+otherwise the mode would be unreachable without an API key.
+
 ## Build and serve the site
 
 ```bash
@@ -83,7 +89,8 @@ the pipeline averages to ISO weeks either way.
 
 ```bash
 mill site.compile             # frontend still compiles
-pipeline/run.sh --verify-only # invariants still hold
+pipeline/run.sh --verify-only # invariants still hold (see the note above on
+                              # which half runs after a --fixtures build)
 ```
 
 The invariants are the real test: they catch the unit errors that produce a

@@ -69,8 +69,13 @@ Other conventions:
 
 - **Cross-source comparison is weekly**, bucketed to ISO weeks and keyed to that
   week's Monday. Sources publish on different days; joining on the week key rather
-  than the publication date makes the comparison exact. The current, incomplete
-  week is excluded.
+  than the publication date makes the comparison exact.
+- **The axis ends at the last week a weekly survey published**, capped at the
+  current week and never earlier than the last complete week. The Oil Bulletin
+  and EIA's retail series are point-in-time surveys — one observation *is* the
+  week — so excluding the current week threw away a published price for up to
+  seven days. Daily-sampled spot cannot extend the axis; an unfinished week there
+  is a partial mean, which is what the three-day rule below is for.
 - **A weekly point needs at least three trading days.** Below that the week
   publishes as null and the chart draws a gap. Without this rule the week of
   2026-08-10 was published as 86.28 USD/bbl — the mean of Monday and Tuesday
@@ -131,6 +136,12 @@ data/fixtures/ trimmed samples so CI runs without an API key
 site/         index.html, the Scala.js app, and the published JSON
 specs/        the spec-driven-development artefacts
 ```
+
+The two kinds of "incomplete" are handled separately and deliberately: the axis
+decides which weeks *exist* (a survey either published or it did not), and
+`min_week_obs` decides whether a daily-sampled week has *enough* observations to
+average. Collapsing them into one rule is what discarded a published retail week
+and, before that, published a two-day crack average as if it were five.
 
 `pipeline/verify.sql` and `pipeline/60_verify_export.sql` are the real test suite.
 They assert the invariants that catch failures producing a *plausible but wrong*

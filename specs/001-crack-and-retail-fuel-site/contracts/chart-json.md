@@ -228,3 +228,28 @@ the crack for exactly this reason, while retail keeps 14. Recency lives in
 `verify 13` recomputes coverage from `stg.spot_daily` rather than reading the
 aggregate that produced the row — a check that reads its own `GROUP BY` cannot
 fail, which this pipeline has already shipped three times.
+
+
+## The week axis (feature 004)
+
+`weeks` runs from `start_week` to the later of:
+
+- the last **complete** week, and
+- the most recent week in which a weekly **point-in-time survey** published —
+  the EU Oil Bulletin, or EIA's `pri/gnd` retail series — capped at the current
+  week.
+
+Daily-sampled sources cannot extend it. Their weeks are means, and an unfinished
+one is a partial mean; that is what the coverage floor in
+[the weekly-coverage section](#weekly-coverage-feature-003) governs.
+
+The floor matters as much as the cap. If a survey stalls, the axis keeps
+advancing and `verify 7`/`7b` see the gap widen; an axis that tracked the stalled
+source would shorten in step with it and report itself fresh. `verify 1e` asserts
+both bounds, because an axis that is merely wrong still looks entirely normal.
+
+**A consequence worth stating: the axis is no longer the coverage.** The crack
+series routinely ends one to two weeks before the retail series on the same
+axis. Anything describing "what the data covers" must read the series, not the
+axis — `Data.span` in the frontend does — or it will promise data that is not
+there.

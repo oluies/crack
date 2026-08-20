@@ -32,7 +32,8 @@ supplied" state rather than an empty or broken chart.
 
 1. **Given** the pipeline has run with a valid EIA key, **When** a visitor opens the
    crack chart, **Then** they see weekly ULSD–Brent and ULSD–WTI spreads in USD per
-   barrel from 2022-01-03 to the most recent complete week.
+   barrel from 2022-01-03 to the most recent week with enough trading days behind
+   it (amended by 003 and 004 — see FR-007).
 2. **Given** a visitor hovers any point, **When** the tooltip appears, **Then** it
    names the week, each series, and the spread to two decimals in USD/bbl.
 3. **Given** `data/manual/ice_gasoil.csv` contains rows, **When** the visitor selects
@@ -181,8 +182,10 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
 - **Sources disagree on the week.** EIA spot prices are daily, EIA retail is weekly
   on Mondays, and the Oil Bulletin publishes weekly on Mondays covering the prior
-  week. All observations are bucketed to an ISO week and keyed to that week's Monday;
-  a partial current week is dropped rather than shown as a dip.
+  week. All observations are bucketed to an ISO week and keyed to that week's Monday.
+  A partial week is caught by the coverage floor on daily-sampled sources rather than
+  by dropping the current week, and a current week a survey has already published is
+  kept — see the amendment on FR-007.
 - **A country stops reporting.** Croatia joined the euro; Bulgaria adopted it in
   2026; the UK appears in the Oil Bulletin history but is not in the EU-27. Country
   membership is resolved from an explicit list, not from whatever columns happen to
@@ -224,7 +227,24 @@ in its own unit, and the axes align at a common baseline rather than floating.
 **Transformation**
 
 - **FR-007**: All observations MUST be aggregated to ISO weeks, each keyed to that
-  week's Monday, with incomplete current weeks excluded.
+  week's Monday.
+
+  *Amended by [003](../003-daily-crack-and-ma7/spec.md) and
+  [004](../004-current-week-and-datestamp/spec.md).* This originally read "with
+  incomplete current weeks excluded", which conflated two different things and got
+  both slightly wrong:
+
+  - **Which weeks exist** is now the axis's job. It ends at the later of the last
+    complete week and the most recent week a weekly point-in-time survey has
+    published, capped at the current week (004, FR-301/FR-302) — which is the
+    *build* week in practice, since 004 FR-308 freezes "today" at build time so
+    `--verify-only` judges the axis by the day it was built. Excluding the current
+    week unconditionally discarded a published retail price for up to seven days —
+    for a survey, one observation *is* the week.
+  - **Whether a week has enough data** is now `min_week_obs` (003, FR-201), and
+    applies only to daily-sampled sources, where an unfinished week really is a
+    partial mean. The old rule missed this entirely: it dropped the *current* week
+    while still averaging a *previous* week over however many days had arrived.
 - **FR-008**: Oil Bulletin prices MUST be converted from EUR per 1000 litres to
   EUR per litre; EIA retail prices MUST be retained as USD per gallon with an
   accompanying USD-per-litre conversion.

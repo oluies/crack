@@ -19,6 +19,19 @@ object Data:
   /** Ett värde saknas -> None. Aldrig 0, aldrig framskrivet. */
   type Series = Vector[Option[Double]]
 
+  /**
+   * Första och sista axelpunkt som NÅGON av serierna faktiskt har ett värde på.
+   *
+   * Axelns ändpunkter duger inte: veckoaxeln sträcker sig till senaste
+   * publicerade retailvecka, medan crack-serien regelmässigt slutar en till två
+   * veckor tidigare eftersom EIA ligger efter. Att skriva ut axeln som
+   * täckning hade alltså lovat data som inte finns — precis den förväxling som
+   * fick en läsare att jämföra ett veckosnitt med en dagskurs.
+   */
+  def span(axis: Vector[String], series: Vector[Series]): Option[(String, String)] =
+    val idx = series.flatMap(_.zipWithIndex.collect { case (Some(_), i) => i })
+    Option.when(idx.nonEmpty)((axis(idx.min), axis(idx.max)))
+
   final case class Source(name: String, url: String, licence: String)
   final case class Meta(generated: String, sources: Vector[Source])
 

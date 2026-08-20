@@ -105,9 +105,27 @@ spread is otherwise null, never interpolated (constitution: missing is null).
 
 ### `week_calendar`
 
-Every ISO week Monday from 2022-01-03 to the last **complete** week. Every published
-series is left-joined onto this so all charts share one axis and gaps stay visible
-as gaps. The current partial week is excluded here, once, rather than in five places.
+Every ISO week Monday from 2022-01-03 to the later of:
+
+- the last **complete** week, and
+- the most recent week in which a weekly **point-in-time survey** has published
+  (EU Oil Bulletin, EIA `pri/gnd`), capped at the build week.
+
+Every published series is left-joined onto this so all charts share one axis and
+gaps stay visible as gaps.
+
+The current week is therefore *included* when a survey has published in it — see
+feature 004, FR-301/FR-302. It was once excluded unconditionally, which discarded a
+published retail price for up to seven days: for those sources one observation *is*
+the week, not a partial mean of it. Daily-sampled sources cannot extend the axis,
+because there an unfinished week genuinely is a partial mean; that case is governed
+by `min_week_obs` instead.
+
+"Today" is `stg.build_meta.built_on`, frozen at build time, so `--verify-only`
+against an older database judges the axis by the day it was built rather than by
+the day it is re-checked. Built in `pipeline/25_calendar.sql`, after the sources are
+parsed — the bound depends on what they published, so it cannot live in
+`00_schema.sql`.
 
 ## Invariants
 
@@ -134,7 +152,8 @@ Each assertion fails the run with a message naming what broke.
 6. `fx_weekly` covers every calendar week for both currencies.
 7. No long trailing run of empty weeks — data has not gone stale upstream.
    Check 7 (crack) is **live runs only**: under `--fixtures` the EIA half is a
-   frozen synthetic snapshot while `week_calendar` tracks `current_date`, so it
+   frozen synthetic snapshot while `week_calendar` follows the build date
+   (`stg.build_meta.built_on`), which advances with every run, so it
    would start failing every CI run weeks after the fixtures were generated,
    blocking pull requests for an unrelated reason.
    Check 7b (EU retail) is **not** gated — the Oil Bulletin is fetched live in

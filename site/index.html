@@ -47,6 +47,14 @@
     .topnav .brand { font-weight: 600; color: #333; margin-right: 4px; }
     .topnav a { color: #36c; text-decoration: none; }
     .topnav a:hover { text-decoration: underline; }
+    /* Datumstämpeln skjuts till höger och bryter till egen rad först när det
+       verkligen behövs — flex-wrap på .topnav sköter resten. */
+    .topnav .stamp { margin-left: auto; color: #777; font-size: 12.5px;
+                     font-variant-numeric: tabular-nums; }
+    .topnav .stamp b { font-weight: 600; color: #555; }
+    @media (max-width: 560px) {
+      .topnav .stamp { margin-left: 0; flex-basis: 100%; }
+    }
 
     .notes { margin-top: 32px; background: #f7f9fc; border: 1px solid #e3e8ef;
              border-radius: 8px; padding: 4px 20px 12px; font-size: 14px;
@@ -100,6 +108,9 @@
     <span class="brand">Crack · diesel margins &amp; pump prices</span>
     <a href="https://github.com/oluies/crack">Source</a>
     <a href="https://github.com/oluies/crack#data-sources">Data sources</a>
+    <!-- Fylls av appen när datan lästs in. Står tom om hämtningen misslyckas,
+         hellre än att visa ett datum som inte hör till någonting. -->
+    <span class="stamp" id="datastamp"></span>
   </nav>
   <div id="app"><p class="loading">Loading…</p></div>
   <footer>© 2026 <a href="https://www.linkedin.com/in/orjanlundberg/">Örjan Lundberg</a> ·

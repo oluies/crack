@@ -1,8 +1,38 @@
--- 00_schema.sql — extensions, week axis and country reference.
+-- 00_schema.sql — extensions, build metadata and country reference.
 --
--- Variables (set by run.sh's generated preamble):
---   work_dir    directory holding the downloaded upstream files
---   start_week  first ISO-week Monday to publish
+-- The week axis is NOT here; it lives in pipeline/25_calendar.sql. See below.
+--
+-- Variables this file reads (set by run.sh's generated preamble):
+--   strict        whether the freshness invariants are fatal for this build
+--   min_week_obs  minimum daily observations behind a published week AND behind
+--                 a point on the 7-day mean — run.sh sets one value for both so
+--                 the two rules cannot drift apart
+--
+-- work_dir and start_week are absent on purpose: they belong to the scripts that
+-- read the sources, not to this one. start_week in particular is the week axis's
+-- lower bound, and the axis is built in 25_calendar.sql. Three attempts at a
+-- fuller map of which script reads which variable were each wrong in a new way;
+-- the list above is what this file reads, and a grep is a better answer than a
+-- prose summary maintained by hand. It needs both spellings:
+--
+--   grep -rE "getvariable|build_meta" pipeline/
+--
+-- Både strict och min_week_obs läses downstream OUT OF stg.build_meta, aldrig
+-- genom getvariable(), så en grep efter getvariable ensam får dem att se
+-- oanvända ut.
+--
+-- Att läsa dem här och inte ur variabeln är inte stilistiskt. --verify-only
+-- kör mot en databas ett tidigare anrop byggde, men skriver en FÄRSK preambel
+-- där strict alltid är true (run.sh: STRICT sätts till false bara i
+-- fixtures-grenen). Ett omverifierat fixtures-bygge skulle alltså bedömas
+-- strikt mot en fryst ögonblicksbild. Tabellen minns vad som gällde när datan
+-- byggdes; variabeln beskriver bara det här anropet.
+--
+-- 50_export.sql läser tabellen av ett ANNAT skäl — exporten körs aldrig under
+-- --verify-only. Där handlar det om coalesce:n nedan: en osatt variabel ger
+-- NULL, NOT NULL är NULL, och meta.synthetic hade publicerats som null i varje
+-- fil. Stämpeln är hela skyddet mot att publicera fixtures-data, och CI letar
+-- efter "synthetic":true, så ett null hade glidit rakt igenom.
 
 INSTALL json;   LOAD json;
 INSTALL excel;  LOAD excel;
@@ -29,25 +59,19 @@ SELECT coalesce(getvariable('strict')::BOOLEAN, true) AS strict,
        -- rapportera två invarianter gröna som inte kan fälla.
        CASE WHEN getvariable('min_week_obs') IS NULL
             THEN error('min_week_obs är inte satt — se preamblen i pipeline/run.sh')
-            ELSE getvariable('min_week_obs')::INTEGER END AS min_week_obs;
+            ELSE getvariable('min_week_obs')::INTEGER END AS min_week_obs,
+       -- Byggdagen, fryst. 25_calendar.sql sätter axelns gräns utifrån den och
+       -- verify 1e kontrollerar gränsen mot samma värde, så de två kan inte
+       -- glida isär. Läses inte ur current_date vid kontrolltillfället:
+       -- --verify-only kör invarianterna mot en databas som byggdes en annan
+       -- dag, och då hade 1e fällt en helt korrekt axel för att kalendern hunnit
+       -- vidare. Färskhet mäts av check 7/16, som är till för just det.
+       current_date AS built_on;
 
--- ---------------------------------------------------------------------------
--- Week axis
---
--- Every published series is left-joined onto this, so all charts share one axis
--- and a missing observation stays visible as a gap. date_trunc('week') is ISO in
--- DuckDB — Monday-based — which is what the sources publish against.
---
--- The upper bound is the last COMPLETE week. Today's week is still accumulating;
--- including it would render a two-day average as a dip. Excluded here, once,
--- rather than in every downstream script.
--- ---------------------------------------------------------------------------
-CREATE OR REPLACE TABLE stg.week_calendar AS
-SELECT UNNEST(generate_series(
-         getvariable('start_week')::DATE,
-         (date_trunc('week', current_date) - INTERVAL 7 DAY)::DATE,
-         INTERVAL 7 DAY
-       ))::DATE AS week_start;
+-- Veckoaxeln byggs INTE här. Dess övre gräns beror på vad källorna faktiskt
+-- publicerat, och de är inte inlästa förrän 10/15/20 har körts — se
+-- pipeline/25_calendar.sql. Att den låg här och bara läste current_date var
+-- skälet till att en publicerad retailvecka kunde kastas i upp till sju dagar.
 
 -- ---------------------------------------------------------------------------
 -- EU-27

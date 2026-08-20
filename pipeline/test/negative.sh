@@ -46,11 +46,71 @@ die() { echo "FEL: $*" >&2; exit 2; }
 command -v python3 >/dev/null  || die "python3 krävs för JSON-korruptionerna"
 command -v duckdb  >/dev/null  || die "duckdb krävs"
 
+# SRC_DB kommer från ett --fixtures-bygge (strict=false) medan SRC_JSON är den
+# committade RIKTIGA datan (synthetic=false): run.sh återställer trädet efter
+# --fixtures, med flit. Paret är alltså inkonsekvent, och check 8b — som jämför
+# stämpeln mot bygget — fäller då varenda export-prov med fel diagnos.
+#
+# Stämpeln i KOPIORNA riktas därför efter databasen innan något prov körs. Det
+# lagar en egenskap hos riggen, inte hos produktionen, där båda kommer ur samma
+# körning. Läses en gång: strict är konstant i SRC_DB.
+# -readonly: filens egen utfästelse högst upp är att den riktiga databasen aldrig
+# rörs, och en skrivbar öppning tar exklusivt lås och kan checkpointa på plats.
+SYNTHETIC=$(duckdb -readonly "$SRC_DB" -noheader -list \
+              -c 'SELECT NOT strict FROM stg.build_meta') \
+  || die "kunde inte läsa strict ur $SRC_DB"
+
+# duckdb skriver en tom rad och avslutar med 0 om build_meta är tom eller strict
+# är NULL, så || die ovan fångar det inte. Ett tomt SYNTHETIC hade stämplat false
+# överallt och fällt varje export-prov på 8b i stället för på sin egen kontroll —
+# alltså precis den vilseledande kaskad de här raderna finns för att stänga.
+case "$SYNTHETIC" in
+  true|false) ;;
+  *) die "oväntat strict-värde i $SRC_DB: '$SYNTHETIC' (bygg om med pipeline/run.sh)" ;;
+esac
+
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+# Sökvägen är $ROOT-ankrad som allt annat i filen, felet tystas inte, och biten
+# rörs bara om den faktiskt behöver återställas — ett avbrott före
+# broken_guard_case ska inte skriva om lägesbiten på en spårad fil.
+restore_guard_mode() {
+  local f="$ROOT/pipeline/check-build-pairing.sh"
+  [ -e "$f" ] || return 0
+  [ -x "$f" ] && return 0
+  chmod +x "$f" \
+    || echo "VARNING: kunde inte återställa lägesbiten på $f — kör: chmod +x $f" >&2
+}
+
+# Lägesbiten på check-build-pairing.sh återställs HÄR och inte bara i provets
+# egen RETURN-trap: provets långsamma steg är en full invariantkörning, och ett
+# avbrott där (Ctrl-C, en dödad CI-step) hoppar över RETURN. Trädet skulle då
+# ligga kvar med en icke körbar guard — provet som finns för att visa att
+# kontroller inte är tröga hade lämnat efter sig en som verkligen är det.
+trap 'rm -rf "$TMP"; restore_guard_mode' EXIT
 mkdir -p "$TMP/data"
 
 pass=0; fail=0
+
+# Egen fil, inte ett heredoc inuti reset_copy: ett heredoc i en funktion som
+# själv skrivs ut ur ett heredoc är hur den här raden gick sönder första gången.
+cat > "$TMP/stamp.py" <<'STAMP_PY'
+import json, sys, glob, os
+d, val = sys.argv[1], sys.argv[2].strip().lower() == 'true'
+stamped = 0
+for f in glob.glob(os.path.join(d, '*.json')):
+    o = json.load(open(f))
+    # Tyst hoppa över vore en no-op: byter exporten form på meta stämplas inget,
+    # och varje export-prov dör på 8b med en diagnos som pekar på korruptionen i
+    # stället för på riggen.
+    if not isinstance(o.get('meta'), dict):
+        sys.exit(f'{os.path.basename(f)}: meta är inte ett objekt — riggen kan '
+                 f'inte rikta stämpeln, och proven skulle rapportera fel kontroll')
+    o['meta']['synthetic'] = val
+    json.dump(o, open(f, 'w'))
+    stamped += 1
+if stamped == 0:
+    sys.exit(f'inga JSON-filer att stämpla i {d}')
+STAMP_PY
 
 # Skrivs en gång, inte per prov: ett prov som råkar köra först ska inte avgöra
 # om filen finns.
@@ -70,6 +130,8 @@ reset_copy() {
   cp "$SRC_DB" "$TMP/t.duckdb"
   rm -rf "$TMP/data"; mkdir -p "$TMP/data"
   cp "$SRC_JSON"/*.json "$TMP/data/"
+  python3 "$TMP/stamp.py" "$TMP/data" "$SYNTHETIC" \
+    || die "kunde inte rikta meta.synthetic i kopiorna"
 }
 
 # Kör korruptionen och KRÄVER att den lyckades. En korruption som felar lämnar
@@ -145,6 +207,20 @@ echo "negativa prov — varje invariant måste kunna fälla:"
 expect_fail "week calendar emptied entirely" "verify 1b" \
   "DELETE FROM stg.week_calendar;" verify
 
+# En databas byggd av en äldre pipeline. Utan check 1a blir svaret ett
+# binder-fel som namnger en kolumn i stället för orsaken — och --verify-only är
+# just kommandot man riktar mot en gammal databas.
+expect_fail "database predates built_on" "verify 1a" \
+  "ALTER TABLE stg.build_meta DROP COLUMN built_on;" verify
+
+expect_fail "database predates min_week_obs" "verify 1a" \
+  "ALTER TABLE stg.build_meta DROP COLUMN min_week_obs;" verify
+
+# En hel tabell borta, inte bara en kolumn: en databas från före feature 003 har
+# ingen day_axis, och utan 1a blir svaret ett katalogfel som namnger tabellen.
+expect_fail "database predates the daily tables" "verify 1a" \
+  "DROP TABLE stg.day_axis;" verify
+
 expect_fail "build_meta emptied (min_week_obs unreadable)" "verify 1d" \
   "DELETE FROM stg.build_meta;" verify
 
@@ -189,6 +265,28 @@ schema_guard "00_schema with min_week_obs"    med  ""
 
 expect_fail "daily axis emptied entirely" "verify 1c" \
   "DELETE FROM stg.day_axis;" verify
+
+# Axeln får inte sträcka sig in i framtiden — möjligt först sedan en publicerad
+# enkätvecka kan dra ut den, alltså ett nytt felläge som behöver ett nytt prov.
+expect_fail "week axis pushed into the future" "verify 1e" \
+  "INSERT INTO stg.week_calendar
+   SELECT (date_trunc('week', (SELECT built_on FROM stg.build_meta)) + INTERVAL 7 DAY)::DATE;" verify
+
+expect_fail "week axis stops short of the last complete week" "verify 1e" \
+  "DELETE FROM stg.week_calendar
+    WHERE week_start >= (date_trunc('week', (SELECT built_on FROM stg.build_meta))
+                         - INTERVAL 7 DAY)::DATE;" verify
+
+# --verify-only kör mot en databas som byggdes en annan dag. Axeln OCH byggdagen
+# flyttas därför tre veckor bakåt tillsammans: inbördes är de konsekventa, så
+# 1e ska tiga. Läste den current_date i stället hade samma korruption fällt —
+# det är just den skillnaden provet finns för att fånga, och 21 dagar är jämna
+# tre veckor så måndagsjusteringen bevaras.
+expect_pass "an axis built three weeks ago still verifies" \
+  "CREATE OR REPLACE TEMP TABLE cut AS
+     SELECT (max(week_start) - INTERVAL 21 DAY)::DATE AS d FROM stg.week_calendar;
+   DELETE FROM stg.week_calendar WHERE week_start > (SELECT d FROM cut);
+   UPDATE stg.build_meta SET built_on = (built_on - INTERVAL 21 DAY)::DATE;" verify
 
 expect_fail "week calendar gap" "verify 1" \
   "DELETE FROM stg.week_calendar WHERE week_start = DATE '2023-06-05';" verify
@@ -319,6 +417,20 @@ expect_fail "fx.json rates.USD null" "verify 8" \
 expect_fail "retail.json series lose values" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"retail.json\"));[s.pop(\"values\") for s in d[\"series\"]];json.dump(d,open(\"retail.json\",\"w\"))"' export
 
+# meta.synthetic måste vara ett BOOLEAN. Innan exporten läste det coalesce:ade
+# värdet ur stg.build_meta kunde en osatt strict-variabel ge "synthetic": null i
+# varje publicerad fil — och ci.yml letar efter "synthetic":true, så ett null
+# hade glidit rakt igenom det skydd stämpeln finns för.
+expect_fail "meta.synthetic is null, not a boolean" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"cracks.json\"));d[\"meta\"][\"synthetic\"]=None;json.dump(d,open(\"cracks.json\",\"w\"))"' export
+
+expect_fail "meta.synthetic missing entirely" "verify 8" \
+  '!python3 -c "import json;d=json.load(open(\"retail.json\"));del d[\"meta\"][\"synthetic\"];json.dump(d,open(\"retail.json\",\"w\"))"' export
+
+# Rätt typ men fel värde: check 8 ser bara att det ÄR ett booleskt värde.
+expect_fail "synthetic stamp contradicts the build" "verify 8b" \
+  '!python3 -c "import json;d=json.load(open(\"fx.json\"));d[\"meta\"][\"synthetic\"]=not d[\"meta\"][\"synthetic\"];json.dump(d,open(\"fx.json\",\"w\"))"' export
+
 expect_fail "cracks.json series emptied" "verify 8" \
   '!python3 -c "import json;d=json.load(open(\"cracks.json\"));d[\"series\"]=[];json.dump(d,open(\"cracks.json\",\"w\"))"' export
 
@@ -435,6 +547,229 @@ guard "export sql does not exist"       fail "$SRC_JSON"         "$TMP/ingen_sad
 # det vore en guard som godkänner allt, vilket är värre än ingen guard.
 printf -- "-- inga COPY-mål alls\n" > "$TMP/export_tom.sql"
 guard "export sql has no COPY targets" fail "$SRC_JSON"         "$TMP/export_tom.sql"        "inga COPY"
+
+# --- databas/fil-paret ---------------------------------------------------------
+#
+# check-build-pairing.sh är skal, inte SQL, av samma skäl som
+# check-export-paths.sh: en guard inne i run.sh kan bara nås genom att köra hela
+# pipelinen, och en oprövad guard är hur de tröga kontrollerna kom in.
+
+pairing() {  # $1 = namn, $2 = "fail"|"pass", $3 = stämpel i filerna, $4 = text
+  local name="$1" want="$2" stamp="$3" want_msg="${4:-}" out rc
+  [ "$want" != "fail" ] || [ -n "$want_msg" ] \
+    || die "pairing '$name': förväntat felmeddelande saknas"
+
+  reset_copy
+  python3 "$TMP/stamp.py" "$TMP/data" "$stamp" || die "pairing '$name': kunde inte stämpla"
+
+  out=$(pipeline/check-build-pairing.sh "$TMP/t.duckdb" "$TMP/data" 2>&1); rc=$?
+
+  if [ "$want" = "pass" ]; then
+    if [ $rc -eq 0 ]; then printf 'ok    %-44s -> stays green\n' "$name"; pass=$((pass+1))
+    else printf 'FAIL  %-44s should have stayed green: %s\n' "$name" "$(printf '%s' "$out" | head -1)"
+         fail=$((fail+1)); fi
+  elif [ $rc -eq 0 ]; then
+    printf 'FAIL  %-44s did not fail at all\n' "$name"; fail=$((fail+1))
+  elif ! printf '%s' "$out" | grep -qF "$want_msg"; then
+    printf 'FAIL  %-44s failed, but not with "%s"\n      got: %s\n' \
+      "$name" "$want_msg" "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
+  else
+    printf 'ok    %-44s -> %s\n' "$name" "$want_msg"; pass=$((pass+1))
+  fi
+}
+
+# $SYNTHETIC är databasens egen polaritet, så den stämpeln hör ihop med den.
+pairing "db and files from the same run" pass "$SYNTHETIC"
+# ... och den motsatta gör det inte. Det är läget efter --fixtures.
+if [ "$SYNTHETIC" = "true" ]; then OTHER=false; else OTHER=true; fi
+pairing "db and files from different runs" fail "$OTHER" "samma körning"
+
+# Saknad fil är export-check 8:s ärende. Två diagnoser för ett fel är värre än en.
+rm -rf "$TMP/empty"; mkdir -p "$TMP/empty"
+if pipeline/check-build-pairing.sh "$TMP/t.duckdb" "$TMP/empty" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "no cracks.json to compare"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "no cracks.json to compare"; fail=$((fail+1))
+fi
+
+# De tysta grenarna: ostämplad fil, ingen databas, databas utan build_meta. Alla
+# lämnar diagnosen till export-check 8, och utan prov skulle en regression som
+# tog bort valid()-grinden få guarden att fälla på ett fel som inte är dess —
+# två diagnoser för ett fel.
+reset_copy
+python3 -c "
+import json
+f='$TMP/data/cracks.json'
+d=json.load(open(f)); d['meta']['synthetic']=None; json.dump(d,open(f,'w'))" \
+  || die "kunde inte skriva en ostämplad cracks.json"
+if pipeline/check-build-pairing.sh "$TMP/t.duckdb" "$TMP/data" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "cracks.json present but unstamped"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "cracks.json present but unstamped"; fail=$((fail+1))
+fi
+
+reset_copy
+if pipeline/check-build-pairing.sh "$TMP/ingen-sadan.duckdb" "$TMP/data" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "no database to compare"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "no database to compare"; fail=$((fail+1))
+fi
+
+reset_copy
+# Filen finns men stg.build_meta går inte att läsa.
+duckdb "$TMP/tom.duckdb" -c "SELECT 1" >/dev/null 2>&1 || die "kunde inte skapa en tom databas"
+if pipeline/check-build-pairing.sh "$TMP/tom.duckdb" "$TMP/data" >/dev/null 2>&1; then
+  printf 'ok    %-44s -> stays green\n' "database without build_meta"; pass=$((pass+1))
+else
+  printf 'FAIL  %-44s should have stayed green\n' "database without build_meta"; fail=$((fail+1))
+fi
+
+# Vad run.sh GÖR med guardens utfall, inte bara vad guarden returnerar. Det som
+# lagades var att --verify-only blev oåtkomligt för den som saknar EIA-nyckel,
+# och den egenskapen ska hållas av sviten i stället för att stå i en kommentar:
+# en inverterad gren eller ett kvarglömt die lämnar annars allt grönt.
+#
+# Kör det RIKTIGA kommandot med flit. Läget finns redan — den här filen kräver
+# ett fixtures-bygge mot det committade trädet, alltså precis det par som är i
+# otakt — och --verify-only läser bara.
+# Bägge grenarna av run.sh:s utfallshantering, deterministiskt och oberoende av
+# vilket bygge som ligger i data/work.
+#
+# Tidigare läste provet läget och prövade den gren som råkade gälla — vilket i
+# CI alltid är fixtures, så den MATCHANDE grenen kördes ingenstans. Det är den
+# enda plats där export-invarianterna körs under --verify-only, så ett tappat
+# "-f pipeline/60_verify_export.sql" hade varit osynligt. CRACK_DB/CRACK_OUT_DIR
+# finns i run.sh för precis det här och honoreras bara i verify-läget.
+verify_only_case() {  # $1 = namn, $2 = stämpel i filerna, $3 = "full"|"degraded"
+  local name="$1" stamp="$2" want="$3" out rc
+  reset_copy
+  python3 "$TMP/stamp.py" "$TMP/data" "$stamp" || die "verify_only_case: kunde inte stämpla"
+
+  out=$(CRACK_DB="$TMP/t.duckdb" CRACK_OUT_DIR="$TMP/data" \
+        pipeline/run.sh --verify-only 2>&1); rc=$?
+
+  # Den omdirigerade körningen får inte röra det riktiga trädet. Preamblen
+  # skrevs tidigare alltid i data/work och stämplade då out_dir mot en
+  # riggkatalog som försvinner med sviten — filen lovar högst upp att bara
+  # arbeta på kopior, och det ska gälla även när run.sh anropas härifrån.
+  if [ -f "$ROOT/data/work/preamble.sql" ] \
+     && grep -qF "$TMP" "$ROOT/data/work/preamble.sql"; then
+    printf 'FAIL  %-44s skrev riggens sökväg i data/work/preamble.sql\n' "$name"
+    fail=$((fail+1)); return 0
+  fi
+
+  if [ $rc -ne 0 ]; then
+    printf 'FAIL  %-44s exit %s\n      %s\n' "$name" "$rc" \
+      "$(printf '%s' "$out" | grep -m1 -E 'FEL|Error' || printf '%s' "$out" | tail -1)"
+    fail=$((fail+1)); return 0
+  fi
+
+  if [ "$want" = "full" ]; then
+    if printf '%s' "$out" | grep -qF "hoppar över"; then
+      printf 'FAIL  %-44s degraderade fast paret hör ihop\n' "$name"; fail=$((fail+1))
+    elif ! printf '%s' "$out" | grep -qF "export-invarianter gröna"; then
+      printf 'FAIL  %-44s körde inte export-invarianterna\n' "$name"; fail=$((fail+1))
+    else
+      printf 'ok    %-44s -> kör bägge uppsättningarna\n' "$name"; pass=$((pass+1))
+    fi
+  else
+    if ! printf '%s' "$out" | grep -qF "hoppar över export-invarianterna"; then
+      printf 'FAIL  %-44s nådde fram men sa inte vad som hoppades över\n' "$name"; fail=$((fail+1))
+    elif ! printf '%s' "$out" | grep -qF "alla invarianter gröna"; then
+      printf 'FAIL  %-44s hoppade över för mycket\n' "$name"; fail=$((fail+1))
+    else
+      printf 'ok    %-44s -> degraderar, kör databasens\n' "$name"; pass=$((pass+1))
+    fi
+  fi
+  return 0
+}
+
+# KÄND LUCKA, medvetet lämnad: att CRACK_DB/CRACK_OUT_DIR bara gäller
+# verify-läget har inget prov.
+#
+# Varje annat läge exporterar, så det enda sättet att pröva restriktionen
+# beteendemässigt är att köra en exporterande körning under riggen — och den
+# skriver om site/public/data, vilket är exakt den incident repot redan haft
+# (syntetisk data committad och publicerad). Ett prov som återställer efteråt
+# återskapar hazarden för att bevisa en trerading.
+#
+# Det som finns i stället: run.sh säger ifrån när variablerna sätts i ett läge
+# som ignorerar dem, så en borttagen restriktion syns i utdatan. Skriv inte ett
+# prov här som bara ser ut att täcka det — en kontroll som inte kan fälla är
+# värre än ingen, vilket är hela filens tes.
+
+# $SYNTHETIC hör ihop med databasen; motsatsen gör det inte.
+if [ "$SYNTHETIC" = "true" ]; then VO_OTHER=false; else VO_OTHER=true; fi
+verify_only_case "--verify-only, matched pair"    "$SYNTHETIC" full
+verify_only_case "--verify-only, mismatched pair" "$VO_OTHER"  degraded
+
+# Den gren som hela förra commiten fanns för, och den enda inget körde: guarden
+# går inte att KÖRA. Ett bart "if" hade behandlat 127 som "paret är i otakt" och
+# tyst hoppat över export-invarianterna — en kontroll som försvinner när den går
+# sönder, vilket är oskiljbart från en som aldrig fungerade.
+#
+# EXIT-trappen högst upp återställer lägesbiten även vid avbrott; RETURN-trappen
+# här gör det direkt. Att git spårar biten gör ändringen SYNLIG, inte återställd.
+broken_guard_case() {
+  local name="--verify-only when the guard cannot run" out rc
+  chmod -x pipeline/check-build-pairing.sh || {
+    printf 'FAIL  %-44s chmod misslyckades\n' "$name"; fail=$((fail+1)); return; }
+  trap 'chmod +x pipeline/check-build-pairing.sh' RETURN
+
+  out=$(pipeline/run.sh --verify-only 2>&1); rc=$?
+
+  if [ $rc -eq 0 ]; then
+    printf 'FAIL  %-44s verifierade ändå\n' "$name"; fail=$((fail+1))
+  elif printf '%s' "$out" | grep -qF "hoppar över"; then
+    printf 'FAIL  %-44s degraderade — ett trasigt skript lästes som obalans\n' "$name"
+    fail=$((fail+1))
+  elif ! printf '%s' "$out" | grep -qF "kontrollen själv är trasig"; then
+    printf 'FAIL  %-44s dog, men inte med rätt diagnos\n      %s\n' "$name" \
+      "$(printf '%s' "$out" | tail -1)"; fail=$((fail+1))
+  else
+    printf 'ok    %-44s -> dör, säger att kontrollen är trasig\n' "$name"; pass=$((pass+1))
+  fi
+}
+broken_guard_case
+
+# Felaktigt anrop är 2, inte 1. Skulle det bli 1 läser run.sh det som "paret är i
+# otakt" och degraderar tyst i stället för att säga att anropet är fel — och
+# ${1:?} gav precis 1, vilket är varför raden finns.
+# Utdatan behålls: en röd som bara säger "exit 1, väntade 2" döljer vilken gren
+# som kördes, och det är den här filens hela poäng att en röd förklarar sig.
+bad_call() {  # $1 = vad som prövas, $2.. = argumenten
+  local intent="$1"; shift
+  local out rc shown label
+  # Avsikten OCH de faktiska argumenten, med $TMP maskerad. Bara avsikten vore
+  # handskriven och kunde glida isär från anropet utan att något märkte det;
+  # bara argumenten ger en oläsbar sökväg som dessutom skiftar varje körning.
+  # Citerade var för sig: annars är utskriften för just de tomma fallen — dem
+  # helheten finns för — helt blank, vilket är precis det som ska synas.
+  if [ $# -eq 0 ]; then shown=""; else shown=$(printf "'%s' " "$@"); fi
+  label="wrong call: $intent [${shown//$TMP/\$TMP}]"
+
+  out=$(pipeline/check-build-pairing.sh "$@" 2>&1); rc=$?
+
+  # Exitkoden ensam räcker inte: skriptet kör under set -e, så vilket framtida
+  # kommando som helst som avslutar med 2 propagerar 2 — och alla fem proven
+  # hade rapporterat grönt för en guard som aldrig nådde användningsgrinden.
+  if [ "$rc" = 2 ] && printf '%s' "$out" | grep -qF 'usage:'; then
+    printf 'ok    %-44s -> exit 2, usage\n' "$label"; pass=$((pass+1))
+  else
+    printf 'FAIL  %-44s -> exit %s (väntade 2 + usage:)\n      %s\n' "$label" "$rc" \
+      "$(printf '%s' "$out" | head -1)"; fail=$((fail+1))
+  fi
+  return 0
+}
+
+bad_call "inga argument"
+bad_call "bara ett argument" "bara-ett"
+# Tomma argument passerar en ren antalskontroll. ${1:?} fällde dem; en
+# $#-kontroll ensam gör det inte, och svaret blir exit 0 på ett trasigt anrop.
+# Bägge leden prövas var för sig — annars kan det ena regrediera obemärkt.
+bad_call "bägge tomma"      "" ""
+bad_call "tom databas"      "" "$TMP/data"
+bad_call "tom out_dir"      "$TMP/t.duckdb" ""
 
 # --- the fetch retry logic ---------------------------------------------------
 #

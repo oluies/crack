@@ -2,10 +2,27 @@ name: Data refresh and deploy
 
 on:
   schedule:
-    # Tuesdays 06:00 UTC. The Oil Bulletin publishes Monday and EIA's weekly
-    # retail series lands Monday afternoon US time; a day's slack means the
-    # refresh picks up the new week rather than repeating the previous one.
-    - cron: '0 6 * * 2'
+    # Wednesdays 20:00 UTC — after all three sources have published, not before.
+    #
+    # The previous slot, Tuesdays 06:00, was chosen on the assumption that the
+    # Oil Bulletin and EIA's retail series both land on Monday. Neither does, and
+    # EIA states its own cadence on the series pages:
+    #
+    #   weekly retail (pet_pri_gnd)  released Tue 2026-08-18, next Tue 2026-08-25
+    #   daily spot    (pet_pri_spt)  released Wed 2026-08-19, next Wed 2026-08-26
+    #
+    # Spot is a weekly release too: the Wednesday drop carries through the prior
+    # Tuesday. So Tuesday 06:00 sampled every source at its stalest — hours
+    # before that day's retail release and a day before the spot release — and
+    # the run fetched last week's data, verified it green, found every export
+    # byte-identical and committed nothing. The site sat a week behind while CI
+    # stayed green about it. The EU bulletin lands somewhere Monday to Wednesday;
+    # the 2026-08-24 survey week was still absent at Tuesday 13:00 UTC.
+    #
+    # 20:00 UTC is 16:00 US Eastern, a few hours after EIA's afternoon releases.
+    # Missing that margin costs a full week, so widen it here rather than in a
+    # retry: this job has no way to notice it ran too early.
+    - cron: '0 20 * * 3'
   workflow_dispatch: {}
   push:
     branches: [main]

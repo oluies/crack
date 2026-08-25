@@ -103,15 +103,24 @@ jobs:
             #
             # Två gränser att känna till, för den som litar på den här raden:
             # en varning på ett grönt jobb når ingen som inte redan öppnat
-            # körningen, och GitHub stänger av schemalagda triggers efter 60
-            # dagar utan aktivitet i repot. Repots enda egengenererade aktivitet
-            # är committen i else-grenen nedan — så en källa som stannat ger
-            # först ett par månaders varningar och sedan inget alls. Mänskliga
-            # commits nollställer klockan, vilket är varför det inte hänt ännu.
-            # Vill man ha ett larm som håller sig självt vid liv får det bli en
-            # sidoeffekt som skriver till repot eller öppnar ett issue; det
-            # första krockar med konstitutionens idempotenskrav och hör hemma i
-            # en amendment, inte i en tyst utökning här.
+            # körningen, och för PUBLIKA repon — oluies/crack är ett — stänger
+            # GitHub av schemalagda triggers efter 60 dagar utan aktivitet i
+            # repot. Repots enda egengenererade aktivitet är committen i
+            # else-grenen nedan, så en källa som stannat ger först ett par
+            # månaders varningar och sedan inga körningar alls. Mänskliga commits
+            # nollställer klockan, vilket är varför det inte hänt ännu; ett mejl
+            # går till ägaren innan avstängningen, och triggern slås på igen för
+            # hand i Actions-fliken. I ett privat repo finns mekanismen inte.
+            #
+            # Vill man ha ett larm som håller sig självt vid liv finns två vägar,
+            # båda med ett pris som hör hemma i beslutet:
+            #   - skriva en rad till repot på no-op-vägen. Håller schemat vid liv
+            #     men bryter mot "A refresh that produces no diff commits nothing"
+            #     (constitution.md, Development Workflow) — en amendment, inte en
+            #     tyst utökning här. Princip V rör run.sh:s utdata och berörs inte.
+            #   - öppna eller uppdatera ett issue. Kräver att permissions-blocket
+            #     ovan utökas med issues: write; blocket är explicit, så
+            #     GITHUB_TOKEN får inget annat och gh issue create ger 403.
             if [ "$GITHUB_EVENT_NAME" = schedule ]; then
               echo "::warning::Schemalagd refresh gav noll dataändringar. Kontrollera"\
                    "EIA:s och kommissionens släppkalendrar mot cron-slotten i den här"\

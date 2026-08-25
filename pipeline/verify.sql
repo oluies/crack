@@ -401,8 +401,9 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     refresh.yml, som inte stoppar deployen. Den varningen är en markering att
 --     läsa, inte ett larm: den syns bara för den som öppnar körningen, och just
 --     i det läge den finns för — en källa som slutat leverera, alltså inga
---     commits — tickar GitHubs 60-dagarsgräns för inaktiva repon mot att stänga
---     av schemat helt. Se refresh.yml för vad den gränsen kräver.
+--     commits — tickar GitHubs 60-dagarsgräns för inaktiva publika repon mot att
+--     stänga av schemat. Se refresh.yml för villkoren och vad ett larm som håller
+--     sig självt vid liv skulle kosta.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

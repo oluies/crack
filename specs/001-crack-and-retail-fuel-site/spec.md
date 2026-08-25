@@ -298,7 +298,8 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
 - **FR-020**: A weekly scheduled workflow MUST run the pipeline, commit changed JSON,
   build the frontend, and deploy to GitHub Pages, committing nothing when no data
-  changed.
+  changed, and raising a warning annotation when the scheduled trigger produces no
+  change at all.
 - **FR-021**: A CI workflow MUST run on push and compile the frontend and validate
   the pipeline SQL without requiring an API key.
 - **FR-022**: The README MUST document every source, its licence, and the ICE gasoil

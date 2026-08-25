@@ -98,29 +98,35 @@ jobs:
             #
             # Varning, inte exit 1: EU-bulletinen har ingen utlovad släpptid och
             # kan legitimt vara sen, och ett rött jobb här skulle stoppa deployen
-            # av data som är i sin ordning. Färskhetsgränserna i verify.sql är
-            # kvar för det motsatta fallet — en källa som slutat leverera helt.
+            # av data som är i sin ordning.
             #
-            # Två gränser att känna till, för den som litar på den här raden:
-            # en varning på ett grönt jobb når ingen som inte redan öppnat
-            # körningen, och för PUBLIKA repon — oluies/crack är ett — stänger
-            # GitHub av schemalagda triggers efter 60 dagar utan aktivitet i
-            # repot. Repots enda egengenererade aktivitet är committen i
-            # else-grenen nedan, så en källa som stannat ger först ett par
-            # månaders varningar och sedan inga körningar alls. Mänskliga commits
-            # nollställer klockan, vilket är varför det inte hänt ännu; ett mejl
-            # går till ägaren innan avstängningen, och triggern slås på igen för
-            # hand i Actions-fliken. I ett privat repo finns mekanismen inte.
+            # Vad varningen är värd, för den som lutar sig mot den:
+            #   - Den notifierar ingen. Den syns för den som öppnar körningen.
+            #   - Den är enda detektorn för EN källa: EIA:s US-retailserie, som
+            #     saknar hård färskhetskontroll. Stannar spot eller EU-bulletinen
+            #     fäller verify 16 (20 dagar) respektive 7b (14) bygget i stället
+            #     — då stoppas deployen och den här raden nås aldrig.
+            #   - Stannar just retailserien committas ingenting, och för PUBLIKA
+            #     repon — oluies/crack är ett — stänger GitHub av schemalagda
+            #     triggers efter 60 dagar utan aktivitet. Repots enda
+            #     egengenererade aktivitet är committen i else-grenen nedan: ett
+            #     par månaders varningar, sedan inga körningar alls. Ett mejl går
+            #     till ägaren först, triggern slås på igen för hand i
+            #     Actions-fliken, och mänskliga commits nollställer klockan —
+            #     därav att det inte hänt än. I privata repon finns mekanismen inte.
             #
-            # Vill man ha ett larm som håller sig självt vid liv finns två vägar,
-            # båda med ett pris som hör hemma i beslutet:
-            #   - skriva en rad till repot på no-op-vägen. Håller schemat vid liv
-            #     men bryter mot "A refresh that produces no diff commits nothing"
-            #     (constitution.md, Development Workflow) — en amendment, inte en
-            #     tyst utökning här. Princip V rör run.sh:s utdata och berörs inte.
-            #   - öppna eller uppdatera ett issue. Kräver att permissions-blocket
-            #     ovan utökas med issues: write; blocket är explicit, så
-            #     GITHUB_TOKEN får inget annat och gh issue create ger 403.
+            # Ett larm utan de bristerna kostar något, och priset hör till beslutet:
+            #   - En rad till repot på no-op-vägen håller schemat vid liv och syns
+            #     i historiken. Bryter mot "a refresh that produces no diff commits
+            #     nothing", som står i constitution.md (Development Workflow),
+            #     FR-020, Independent Test och acceptansscenario 2 — fyra artefakter,
+            #     alltså en amendment, inte en tyst utökning här. Princip V rör
+            #     run.sh:s byte-identiska utdata; en daterad loggrad ligger utanför
+            #     observationerna och rör den inte (plan.md löser V-spänningen via
+            #     just skip-commit, så det är där en läsare hamnar).
+            #   - Ett issue notifierar men håller INTE schemat vid liv. Kräver
+            #     issues: write i permissions-blocket ovan — blocket är explicit —
+            #     och GH_TOKEN i stegets env, annars faller gh innan 403:an.
             if [ "$GITHUB_EVENT_NAME" = schedule ]; then
               echo "::warning::Schemalagd refresh gav noll dataändringar. Kontrollera"\
                    "EIA:s och kommissionens släppkalendrar mot cron-slotten i den här"\

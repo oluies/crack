@@ -398,13 +398,11 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     hela bygget (.bail on) och stoppar deployen, så den är till för en källa
 --     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
---     refresh.yml, som inte stoppar deployen. Den varningen är en markering att
---     läsa, inte ett larm: den syns bara för den som öppnar körningen, och just
---     i det läge DEN kontrollen inte täcker — en stannad US-retailserie, som
---     ingen färskhetskontroll bevakar — tickar GitHubs 60-dagarsgräns för
---     inaktiva publika repon mot att stänga av schemat. Stannar spot eller
---     EU-bulletinen fäller den här kontrollen och 7b bygget långt innan dess.
---     Se refresh.yml för villkoren och vad ett självbärande larm skulle kosta.
+--     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när
+--     INGEN källa rört sig — den jämför hela site/public/data — så en enskild
+--     stannad serie går förbi både den och den här kontrollen. EIA:s
+--     US-retailserie är det tydliga hålet: ingen färskhetskontroll här, ingen
+--     varning där. Se refresh.yml för vad ett larm som täcker det skulle kosta.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

@@ -90,43 +90,36 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add site/public/data
           if git diff --cached --quiet -- site/public/data; then
-            # Noll ändringar är normalt på en manuell körning och avvikande på en
-            # schemalagd: slottet ligger efter båda EIA-släppen, så spot- och
-            # retail-serierna ska ha flyttat sig sedan förra veckan. Just den
-            # tysta raden lät ett felställt schema gå oupptäckt — körningen var
-            # grön varje vecka och sa ingenting om att den hämtade gammal data.
+            # Villkoret ovan jämför HELA site/public/data. Noll ändringar är
+            # alltså "ingen källa flyttade sig" — normalt på en manuell körning,
+            # avvikande på en schemalagd, eftersom slottet ligger efter båda
+            # EIA-släppen. Tystnaden här lät ett felställt schema gå oupptäckt:
+            # grön körning varje vecka, gammal data, ingenting sagt.
             #
             # Varning, inte exit 1: EU-bulletinen har ingen utlovad släpptid och
-            # kan legitimt vara sen, och ett rött jobb här skulle stoppa deployen
-            # av data som är i sin ordning.
+            # kan legitimt vara sen, och ett rött jobb skulle stoppa deployen av
+            # data som är i sin ordning. Vid en total stiltje blir det ändå rött
+            # inom ett par veckor — verify 7b fäller på 14 dagar.
             #
-            # Vad varningen är värd, för den som lutar sig mot den:
-            #   - Den notifierar ingen. Den syns för den som öppnar körningen.
-            #   - Den är enda detektorn för EN källa: EIA:s US-retailserie, som
-            #     saknar hård färskhetskontroll. Stannar spot eller EU-bulletinen
-            #     fäller verify 16 (20 dagar) respektive 7b (14) bygget i stället
-            #     — då stoppas deployen och den här raden nås aldrig.
-            #   - Stannar just retailserien committas ingenting, och för PUBLIKA
-            #     repon — oluies/crack är ett — stänger GitHub av schemalagda
-            #     triggers efter 60 dagar utan aktivitet. Repots enda
-            #     egengenererade aktivitet är committen i else-grenen nedan: ett
-            #     par månaders varningar, sedan inga körningar alls. Ett mejl går
-            #     till ägaren först, triggern slås på igen för hand i
-            #     Actions-fliken, och mänskliga commits nollställer klockan —
-            #     därav att det inte hänt än. I privata repon finns mekanismen inte.
+            # Vad raden INTE täcker, och det är avsiktligt kvar som ett hål:
+            #   - En enskild stannad serie. Övriga rör sig, diffen är icke-tom,
+            #     och den här grenen nås aldrig.
+            #   - EIA:s US-retailserie särskilt: den saknar färskhetskontroll i
+            #     verify.sql, och täcks alltså varken av en error() eller av den
+            #     här varningen. Ingenting bevakar den i dag.
+            #   - Notifiering. Varningen syns för den som öppnar körningen.
+            #     Röda körningar mejlas däremot ut, vilket är den starkare
+            #     signalen — och för publika repon (detta är ett) stänger GitHub
+            #     av schemalagda triggers efter 60 dagar utan aktivitet i repot,
+            #     som varken en varning eller ett rött jobb skapar.
             #
-            # Ett larm utan de bristerna kostar något, och priset hör till beslutet:
-            #   - En rad till repot på no-op-vägen håller schemat vid liv och syns
-            #     i historiken. Bryter mot "a refresh that produces no diff commits
-            #     nothing", som står i constitution.md (Development Workflow),
-            #     FR-020, Independent Test och acceptansscenario 2 — fyra artefakter,
-            #     alltså en amendment, inte en tyst utökning här. Princip V rör
-            #     run.sh:s byte-identiska utdata; en daterad loggrad ligger utanför
-            #     observationerna och rör den inte (plan.md löser V-spänningen via
-            #     just skip-commit, så det är där en läsare hamnar).
-            #   - Ett issue notifierar men håller INTE schemat vid liv. Kräver
-            #     issues: write i permissions-blocket ovan — blocket är explicit —
-            #     och GH_TOKEN i stegets env, annars faller gh innan 403:an.
+            # Ett larm som täcker hålen är ett öppet beslut, inte en glömska: en
+            # rad till repot håller schemat vid liv men bryter mot regeln att en
+            # refresh utan diff inte committar (constitution.md, spec.md:s FR-020,
+            # Independent Test och acceptansscenario 2, tasks.md) — en amendment.
+            # Ett issue notifierar men håller inte schemat vid liv och kräver
+            # issues: write plus GH_TOKEN i steget. Princip V berörs av ingendera:
+            # den binder run.sh:s utdata, inte vad workflowet skriver bredvid.
             if [ "$GITHUB_EVENT_NAME" = schedule ]; then
               echo "::warning::Schemalagd refresh gav noll dataändringar. Kontrollera"\
                    "EIA:s och kommissionens släppkalendrar mot cron-slotten i den här"\

@@ -93,7 +93,9 @@ Other conventions:
   the next one. An earlier note here called the week-long lag a property of the
   source that no schedule could touch; that was measured hours before a release,
   and the swing is real. `refresh.yml` now runs Wednesday evenings to sample near
-  the fresh end. What no schedule fixes is that a lag exists at all, so
+  the fresh end, and the freshness invariants stay wide because they fail the
+  whole build — they are there for a source that has stopped delivering, not for a
+  run that landed at the stale end of the cycle. What no schedule fixes is that a lag exists at all, so
   `meta.generated` — when the pipeline ran — still says nothing about how old the
   data is, and the daily view prints the last observation date and the lag beside
   it rather than letting the two be confused.
@@ -162,11 +164,13 @@ than no check, because it reports green and is believed.
 - `.github/workflows/ci.yml` — on push and pull request: compile the frontend, run
   the pipeline against fixtures, run the negative tests, and run the headless
   frontend smoke test.
-- `.github/workflows/refresh.yml` — Wednesdays 20:00 UTC, after all three sources
-  have published: run the pipeline for real, commit changed JSON, build, and
-  deploy to Pages. A run that changes nothing commits nothing — which is also
-  what a badly timed schedule looks like, so if week after week commits nothing,
-  check the release calendars in the cron comment before suspecting the fetch.
+- `.github/workflows/refresh.yml` — Wednesdays 22:00 UTC, after both EIA release
+  calendars; the EU bulletin has no published release time and usually, but not
+  always, lands by then. Runs the pipeline for real, commits changed JSON, builds,
+  and deploys to Pages. A run that changes nothing commits nothing — which is also
+  what a badly timed schedule looks like, so a scheduled run that moves nothing
+  now raises a warning annotation instead of passing in silence. Check the release
+  calendars in the cron comment before suspecting the fetch.
 
 The Oil Bulletin download path is a UUID the Commission reissues when it
 republishes. It lives in `pipeline/sources.env`; when the download starts failing,

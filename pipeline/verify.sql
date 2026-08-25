@@ -256,11 +256,14 @@ FROM (
 --    must fail CI rather than sail through it.
 --
 --    Slacken för crack är 21 dagar, inte 14 som för retail, och det är en följd
---    av coverage-regeln nedan: EIA ligger ~8 dagar efter, så den sista
---    kalenderveckan har regelmässigt för få handelsdagar och publiceras som
---    NULL. Ett normalläge är alltså redan en veckas glapp, och 14 dagar hade
---    fällt bygget på en enda sen EIA-publicering. Dagsserien är stället där
---    färskhet faktiskt mäts — se verify 16.
+--    av coverage-regeln nedan. EIA:s spotserie släpps en gång i veckan, på
+--    onsdagar, och bär till och med tisdagen före — eftersläpningen pendlar
+--    alltså mellan en och åtta dagar beroende på var i cykeln bygget landar.
+--    Även i det färskaste läget har den innevarande kalenderveckan bara måndag
+--    och tisdag, färre handelsdagar än coverage-golvet, och publiceras som NULL.
+--    Ett normalläge är alltså redan en veckas glapp, och 14 dagar hade fällt
+--    bygget på en enda sen EIA-publicering. Dagsserien är stället där färskhet
+--    faktiskt mäts — se verify 16.
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.crack_weekly
                              WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 21
@@ -386,9 +389,16 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 -- 16. Dagsdatan är färsk.
 --
 --     Här, inte i check 7, är färskheten meningsfull: dagsserien slutar på EIA:s
---     sista publicerade dag utan utjämning emellan. EIA ligger normalt ~8 dagar
---     efter, så 20 dagar ger gott om marginal för en helg plus en sen
---     publicering, men fäller en källa som slutat leverera.
+--     sista publicerade dag utan utjämning emellan. Släppet kommer på onsdagar
+--     och bär till och med tisdagen före, så eftersläpningen är en dag strax
+--     efter ett släpp och åtta strax före nästa. 20 dagar rymmer alltså två helt
+--     uteblivna släpp innan något faller ut.
+--
+--     Avsiktligt vitt, inte kalibrerat mot slotten: den här kontrollen fäller
+--     hela bygget (.bail on) och stoppar deployen, så den är till för en källa
+--     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
+--     cykeln. Det senare syns i stället som varningen på noll dataändringar i
+--     refresh.yml, som varken stoppar deployen eller kan tystna av sig själv.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

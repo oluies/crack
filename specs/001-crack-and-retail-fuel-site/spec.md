@@ -180,9 +180,14 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
 ### Edge Cases
 
-- **Sources disagree on the week.** EIA spot prices are daily, EIA retail is weekly
-  on Mondays, and the Oil Bulletin publishes weekly on Mondays covering the prior
-  week. All observations are bucketed to an ISO week and keyed to that week's Monday.
+- **Sources disagree on the week.** EIA spot prices are daily, EIA retail is a
+  weekly observation keyed to Monday, and the Oil Bulletin is a weekly Monday
+  survey covering the prior week. Those are the periods, not the release days,
+  and the two were conflated here until 2026-08-25: EIA releases the retail
+  series on Tuesday and the spot series on Wednesday (carrying through the prior
+  Tuesday), and the bulletin workbook appears somewhere Monday to Wednesday. The
+  dated evidence, and what it means for the refresh slot, is in the cron comment
+  in `.github/workflows/refresh.yml`. All observations are bucketed to an ISO week and keyed to that week's Monday.
   A partial week is caught by the coverage floor on daily-sampled sources rather than
   by dropping the current week, and a current week a survey has already published is
   kept — see the amendment on FR-007.

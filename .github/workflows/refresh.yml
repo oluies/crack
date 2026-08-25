@@ -2,7 +2,7 @@ name: Data refresh and deploy
 
 on:
   schedule:
-    # Wednesdays 20:00 UTC — after all three sources have published, not before.
+    # Wednesdays 22:00 UTC — after both EIA release calendars, not before them.
     #
     # The previous slot, Tuesdays 06:00, was chosen on the assumption that the
     # Oil Bulletin and EIA's retail series both land on Monday. Neither does, and
@@ -12,17 +12,23 @@ on:
     #   daily spot    (pet_pri_spt)  released Wed 2026-08-19, next Wed 2026-08-26
     #
     # Spot is a weekly release too: the Wednesday drop carries through the prior
-    # Tuesday. So Tuesday 06:00 sampled every source at its stalest — hours
-    # before that day's retail release and a day before the spot release — and
-    # the run fetched last week's data, verified it green, found every export
+    # Tuesday. So Tuesday 06:00 sampled both at their stalest — hours before that
+    # day's retail release and a day before the spot release — and the run
+    # fetched last week's data, verified it green, found every export
     # byte-identical and committed nothing. The site sat a week behind while CI
-    # stayed green about it. The EU bulletin lands somewhere Monday to Wednesday;
-    # the 2026-08-24 survey week was still absent at Tuesday 13:00 UTC.
+    # stayed green about it.
     #
-    # 20:00 UTC is 16:00 US Eastern, a few hours after EIA's afternoon releases.
-    # Missing that margin costs a full week, so widen it here rather than in a
-    # retry: this job has no way to notice it ran too early.
-    - cron: '0 20 * * 3'
+    # The EU bulletin is deliberately NOT part of that claim: it has no published
+    # release time. Observed, it lands somewhere Monday to Wednesday, and the
+    # 2026-08-24 survey week was still absent at Tuesday 13:00 UTC. This slot
+    # usually catches it and is not guaranteed to.
+    #
+    # 22:00 UTC is 18:00 US Eastern in summer and 17:00 in winter — the offset is
+    # seasonal, the cron is not, so the margin is sized for the winter figure.
+    # Missing that margin costs a full week, so it is spent here rather than in a
+    # retry: this job cannot tell that it ran too early, only that nothing moved,
+    # which is what the warning in the commit step is for.
+    - cron: '0 22 * * 3'
   workflow_dispatch: {}
   push:
     branches: [main]
@@ -83,7 +89,23 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add site/public/data
           if git diff --cached --quiet -- site/public/data; then
-            echo "Inga dataändringar – hoppar commit."
+            # Noll ändringar är normalt på en manuell körning och avvikande på en
+            # schemalagd: slottet ligger efter båda EIA-släppen, så spot- och
+            # retail-serierna ska ha flyttat sig sedan förra veckan. Just den
+            # tysta raden lät ett felställt schema gå oupptäckt — körningen var
+            # grön varje vecka och sa ingenting om att den hämtade gammal data.
+            #
+            # Varning, inte exit 1: EU-bulletinen har ingen utlovad släpptid och
+            # kan legitimt vara sen, och ett rött jobb här skulle stoppa deployen
+            # av data som är i sin ordning. Färskhetsgränserna i verify.sql är
+            # kvar för det motsatta fallet — en källa som slutat leverera helt.
+            if [ "$GITHUB_EVENT_NAME" = schedule ]; then
+              echo "::warning::Schemalagd refresh gav noll dataändringar. Kontrollera"\
+                   "EIA:s och kommissionens släppkalendrar mot cron-slotten i den här"\
+                   "filen innan du misstänker hämtningen."
+            else
+              echo "Inga dataändringar – hoppar commit."
+            fi
           else
             git commit -m "data refresh $(date -u +%Y-%m-%d) [skip ci]"
             git push

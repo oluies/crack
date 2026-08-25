@@ -398,7 +398,11 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     hela bygget (.bail on) och stoppar deployen, så den är till för en källa
 --     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
---     refresh.yml, som varken stoppar deployen eller kan tystna av sig själv.
+--     refresh.yml, som inte stoppar deployen. Den varningen är en markering att
+--     läsa, inte ett larm: den syns bara för den som öppnar körningen, och just
+--     i det läge den finns för — en källa som slutat leverera, alltså inga
+--     commits — tickar GitHubs 60-dagarsgräns för inaktiva repon mot att stänga
+--     av schemat helt. Se refresh.yml för vad den gränsen kräver.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

@@ -150,9 +150,12 @@ currency next to the weekly ECB rates. Three separately rounded pipelines would 
 against each other; one source of truth plus client-side arithmetic cannot
 (constitution "Currency conversion is a presentation concern").
 
-**Weeks are ISO weeks keyed to Monday.** EIA spot is daily, EIA retail is Monday, the
-Oil Bulletin is weekly-on-Monday-for-the-prior-week. Bucketing everything to
-`date_trunc('week', …)` makes cross-source joins exact instead of approximate.
+**Weeks are ISO weeks keyed to Monday.** EIA spot is daily, EIA retail is a weekly
+observation keyed to Monday, the Oil Bulletin is a weekly Monday survey for the
+prior week. Bucketing everything to `date_trunc('week', …)` makes cross-source
+joins exact instead of approximate. Those keys say nothing about when each source
+publishes — releases are Tuesday (EIA retail), Wednesday (EIA spot) and Monday to
+Wednesday (bulletin), which is what the refresh schedule has to be derived from.
 
 Dropping the incomplete current week was the original guard against a two-day
 average rendering as a dip. It has since been replaced: a coverage floor on

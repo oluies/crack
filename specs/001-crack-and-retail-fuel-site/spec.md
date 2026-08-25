@@ -120,7 +120,10 @@ nothing.
 1. **Given** the weekly cron fires, **When** upstream data has advanced, **Then**
    refreshed JSON is committed and the site redeploys.
 2. **Given** the cron fires with no upstream change, **When** the pipeline completes,
-   **Then** no commit is made.
+   **Then** no commit is made — and on the scheduled trigger the run also raises a
+   warning annotation, because a slot placed after both EIA releases should always
+   see those series advance, so nothing moving means the schedule or a source needs
+   looking at. The annotation is visible on the run, not pushed anywhere.
 3. **Given** an upstream source is unreachable, **When** the pipeline fails, **Then**
    the previously published data stays live and the workflow reports failure.
 

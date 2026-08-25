@@ -27,7 +27,8 @@ on:
     # seasonal, the cron is not, so the margin is sized for the winter figure.
     # Missing that margin costs a full week, so it is spent here rather than in a
     # retry: this job cannot tell that it ran too early, only that nothing moved,
-    # which is what the warning in the commit step is for.
+    # which is what the warning in the commit step is for — with the limits noted
+    # there.
     - cron: '0 22 * * 3'
   workflow_dispatch: {}
   push:
@@ -99,6 +100,18 @@ jobs:
             # kan legitimt vara sen, och ett rött jobb här skulle stoppa deployen
             # av data som är i sin ordning. Färskhetsgränserna i verify.sql är
             # kvar för det motsatta fallet — en källa som slutat leverera helt.
+            #
+            # Två gränser att känna till, för den som litar på den här raden:
+            # en varning på ett grönt jobb når ingen som inte redan öppnat
+            # körningen, och GitHub stänger av schemalagda triggers efter 60
+            # dagar utan aktivitet i repot. Repots enda egengenererade aktivitet
+            # är committen i else-grenen nedan — så en källa som stannat ger
+            # först ett par månaders varningar och sedan inget alls. Mänskliga
+            # commits nollställer klockan, vilket är varför det inte hänt ännu.
+            # Vill man ha ett larm som håller sig självt vid liv får det bli en
+            # sidoeffekt som skriver till repot eller öppnar ett issue; det
+            # första krockar med konstitutionens idempotenskrav och hör hemma i
+            # en amendment, inte i en tyst utökning här.
             if [ "$GITHUB_EVENT_NAME" = schedule ]; then
               echo "::warning::Schemalagd refresh gav noll dataändringar. Kontrollera"\
                    "EIA:s och kommissionens släppkalendrar mot cron-slotten i den här"\

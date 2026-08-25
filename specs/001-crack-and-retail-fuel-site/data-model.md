@@ -37,8 +37,12 @@ aggregates masquerading as prefixes).
 | `fuel` | `VARCHAR` | `diesel` \| `gasoline` |
 | `usd_per_gal` | `DOUBLE` | As published |
 
-EIA already publishes these weekly on Mondays; the week key is a `date_trunc`, not
-an aggregation, and a duplicate would signal an upstream change — asserted.
+EIA already publishes these as weekly observations keyed to Monday; the week key is
+a `date_trunc`, not an aggregation, and a duplicate would signal an upstream change
+— asserted. Monday is the period, not the release day: EIA releases this series on
+Tuesday, and the daily spot series on Wednesday. Deriving a refresh schedule from
+the period key samples both before they publish — see the cron comment in
+`.github/workflows/refresh.yml`.
 
 ### `retail_eu_weekly` — from `20_oilbulletin.sql`
 

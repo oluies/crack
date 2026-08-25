@@ -398,11 +398,11 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     hela bygget (.bail on) och stoppar deployen, så den är till för en källa
 --     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
---     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när
---     INGEN källa rört sig — den jämför hela site/public/data — så en enskild
---     stannad serie går förbi både den och den här kontrollen. EIA:s
---     US-retailserie är det tydliga hålet: ingen färskhetskontroll här, ingen
---     varning där. Se refresh.yml för vad ett larm som täcker det skulle kosta.
+--     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
+--     källa rört sig — den jämför hela site/public/data — så en serie UTAN
+--     färskhetskontroll går förbi både den och den här kontrollen. Spot fälls av
+--     den här, EU-retail av 7b; EIA:s US-retailserie är den enda som ingen av
+--     dem ser. Se refresh.yml för vad ett larm som täcker den skulle kosta.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

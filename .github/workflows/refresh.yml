@@ -99,19 +99,28 @@ jobs:
             # Varning, inte exit 1: EU-bulletinen har ingen utlovad släpptid och
             # kan legitimt vara sen, och ett rött jobb skulle stoppa deployen av
             # data som är i sin ordning. Vid en total stiltje blir det ändå rött
-            # inom ett par veckor — verify 7b fäller på 14 dagar.
+            # efter ungefär tre veckor: verify 16 fäller när dagsserien är 20
+            # dagar gammal — tredje körningen efter stoppet, då lagget gått 1, 8,
+            # 15, 22. 7b:s 14 dagar mäts mellan veckostarter, växer i
+            # sjudagarssteg och slår till först vid 21: senare, inte tidigare.
             #
             # Vad raden INTE täcker, och det är avsiktligt kvar som ett hål:
-            #   - En enskild stannad serie. Övriga rör sig, diffen är icke-tom,
-            #     och den här grenen nås aldrig.
-            #   - EIA:s US-retailserie särskilt: den saknar färskhetskontroll i
-            #     verify.sql, och täcks alltså varken av en error() eller av den
-            #     här varningen. Ingenting bevakar den i dag.
+            #   - En enskild stannad serie, på två olika sätt. Har den en hård
+            #     färskhetskontroll (spot: verify 16, EU-retail: 7b) fälls
+            #     Refresh data och det här steget körs aldrig — inget if:
+            #     always(). Saknar den en, passerar den tyst: övriga serier rör
+            #     sig, diffen är icke-tom, och else-grenen committar som vanligt.
+            #   - EIA:s US-retailserie är den enda i den andra kategorin. Ingen
+            #     färskhetskontroll i verify.sql, ingen varning här. Ingenting
+            #     bevakar den i dag.
             #   - Notifiering. Varningen syns för den som öppnar körningen.
             #     Röda körningar mejlas däremot ut, vilket är den starkare
-            #     signalen — och för publika repon (detta är ett) stänger GitHub
-            #     av schemalagda triggers efter 60 dagar utan aktivitet i repot,
-            #     som varken en varning eller ett rött jobb skapar.
+            #     signalen. För publika repon (detta är ett) stänger GitHub av
+            #     schemalagda triggers efter 60 dagar utan aktivitet i repot, som
+            #     varken en varning eller ett rött jobb skapar — men klockan
+            #     nollställs av vilken repoaktivitet som helst, mänskliga commits
+            #     inkluderade, ett mejl går ut före avstängningen och triggern
+            #     slås på igen för hand i Actions-fliken.
             #
             # Ett larm som täcker hålen är ett öppet beslut, inte en glömska: en
             # rad till repot håller schemat vid liv men bryter mot regeln att en

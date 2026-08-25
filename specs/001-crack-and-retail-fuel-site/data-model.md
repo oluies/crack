@@ -166,7 +166,12 @@ Each assertion fails the run with a message naming what broke.
    Check 7c (US retail) is gated like 7, for the same reason: it comes from EIA.
    It was added on 2026-08-25, when US retail turned out to be the one series no
    invariant watched — and one the refresh workflow's zero-diff warning cannot
-   see either, since that fires only when no source at all has moved.
+   see either, since that fires only when no source at all has moved. It measures
+   the smallest per-fuel maximum, because this table carries two independent EIA
+   series and a table-wide `max()` would stay fresh on one while the other
+   stalled; check 7d counts the fuels, since a fuel that disappears entirely
+   leaves no group for that minimum to see. The regional series are fetched in a
+   separate request and have no freshness check of their own.
    Strictness is recorded in `stg.build_meta` at build time, not read from the
    current invocation: `--verify-only` re-checks a database an earlier run
    built, and deriving it from the current mode failed a fixtures build the

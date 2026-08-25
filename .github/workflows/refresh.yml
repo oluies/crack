@@ -112,8 +112,9 @@ jobs:
             #     passerar den däremot tyst här: övriga rör sig, diffen är
             #     icke-tom, och else-grenen committar som vanligt. Så var det
             #     för US retail fram till 2026-08-25.
-            #   - En enskild region som slutar rapportera medan de andra
-            #     fortsätter. Se noten vid 7c för varför den inte bevakas.
+            #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
+            #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
+            #     samtidigt som de nationella serierna. Se noten vid 7c.
             #   - Notifiering. Varningen syns för den som öppnar körningen.
             #     Röda körningar mejlas däremot ut, vilket är den starkare
             #     signalen. För publika repon (detta är ett) stänger GitHub av

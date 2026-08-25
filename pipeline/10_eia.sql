@@ -55,8 +55,9 @@ WHERE d.period::DATE >= getvariable('start_week')::DATE
   AND TRY_CAST(d.value AS DOUBLE) IS NOT NULL
   AND d.series::VARCHAR IN ('EMM_EPMR_PTE_NUS_DPG', 'EMD_EPD2D_PTE_NUS_DPG');
 
--- date_trunc is a key derivation here, not an aggregation: EIA already
--- publishes these on Mondays.
+-- date_trunc is a key derivation here, not an aggregation: EIA already keys these
+-- observations to Mondays. Monday is the period, not the release day — the series
+-- is released on Tuesdays, which is what the refresh cron is derived from.
 CREATE OR REPLACE TABLE stg.retail_us_weekly AS
 SELECT
   date_trunc('week', obs_date)::DATE AS week_start,

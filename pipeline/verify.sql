@@ -298,21 +298,48 @@ END AS "7b EU retail data fresh"
 --     på en måndag, då EU-bulletinen publicerat veckan och EIA ännu inte, plus
 --     ett enda missat släpp. Flytta den med belägg, inte på känsla.
 --
---     Regionserierna (stg.region_weekly, usregions.json) hämtas från samma
---     pri/gnd-endpoint och släpps samtidigt, så en stannad hämtning fäller den
---     här kontrollen också. Det som INTE täcks är en enskild region som slutar
---     rapportera medan de andra fortsätter — max() över tabellen ser inte det,
---     och ett per-regionprov hade i stället gjort bygget permanent rött den dag
---     EIA lägger ner en delstatsserie. Kontrollerna 11b och 12 ser bara att
---     serierna ligger på samma axel, vilket en stannad serie gör med nullor.
+--     Mätningen är minsta max PER BRÄNSLE, inte max över tabellen: här ligger
+--     två oberoende EIA-serier, gasoline och diesel, och stannar den ena hade
+--     ett tabellbrett max hållits färskt av den andra i all evighet. Ett bränsle
+--     som försvinner helt lämnar ingen grupp alls — det fångar 7d.
+--
+--     Regionserierna (stg.region_weekly, usregions.json) täcks INTE av den här
+--     kontrollen. De hämtas i en egen förfrågan med en egen serielista
+--     (EIA_REGION_SERIES), så 7c ser dem bara i den mån de stannar samtidigt som
+--     de nationella. Fryser regionuppsättningen medan de nationella fortsätter
+--     är 7c grön, region_weekly håller axeln med gamla veckor, och det enda som
+--     står emellan är 60_verify_export check 8, som avvisar en TOM regionlista —
+--     inte en fryst. Detsamma gäller en enskild region som slutar rapportera.
+--     Ett per-regionprov hade fällt det, till priset av ett permanent rött bygge
+--     den dag EIA lägger ner en delstatsserie; 11b och 12 ser bara att serierna
+--     ligger på samma axel, vilket en stannad serie gör med nullor.
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
-                 - coalesce((SELECT max(week_start) FROM stg.retail_us_weekly
-                             WHERE usd_per_gal IS NOT NULL), DATE '1900-01-01') > 14
-  THEN error(format('verify 7c: US retail data stale - calendar ends {}, last observation {}',
+                 - coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                                  FROM stg.retail_us_weekly
+                                                  WHERE usd_per_gal IS NOT NULL
+                                                  GROUP BY fuel)), DATE '1900-01-01') > 14
+  THEN error(format('verify 7c: US retail data stale - calendar ends {}, oldest fuel ends {}',
                     coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
-                    coalesce((SELECT max(week_start) FROM stg.retail_us_weekly
-                              WHERE usd_per_gal IS NOT NULL)::VARCHAR, 'none')))
+                    coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                                   FROM stg.retail_us_weekly
+                                                   WHERE usd_per_gal IS NOT NULL
+                                                   GROUP BY fuel))::VARCHAR, 'none')))
 END AS "7c US retail data fresh"
+;
+
+-- 7d. Båda US-bränslen finns över huvud taget.
+--
+--     7c mäter minsta max PER BRÄNSLE, vilket är hela poängen: tabellen bär två
+--     oberoende EIA-serier (gasoline, diesel) och ett max() över alltihop hade
+--     hållits färskt av den ena medan den andra stannade. Men ett bränsle som
+--     försvinner HELT lämnar ingen grupp kvar för min() att se, och då är 7c
+--     grön igen. Därför den här: bränslena räknas, de mäts inte.
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
+                 AND (SELECT count(DISTINCT fuel) FROM stg.retail_us_weekly) < 2
+  THEN error(format('verify 7d: US retail is missing a fuel - present: {}',
+                    coalesce((SELECT string_agg(DISTINCT fuel, ', ')
+                              FROM stg.retail_us_weekly), 'none')))
+END AS "7d US retail covers both fuels"
 ;
 
 -- ---------------------------------------------------------------------------

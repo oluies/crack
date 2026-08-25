@@ -349,6 +349,26 @@ expect_fail "retail_us_weekly emptied entirely (error(NULL))" "verify 7c" \
   "UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_us_weekly;" verify
 
+# Tabellen bär två oberoende EIA-serier. Ett tabellbrett max() hade hållits
+# färskt av den ena medan den andra stannade, och ingen annan kontroll ser det:
+# export-check 10 kräver bara att len(values) == len(weeks), vilket en svans av
+# nullor uppfyller. Därför mäter 7c minsta max per bränsle — och därför finns
+# det här provet, som före den ändringen var osynligt för hela sviten.
+expect_fail "only US diesel goes stale (strict build)" "verify 7c" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly
+    WHERE fuel = 'diesel' AND week_start > DATE '2026-01-01';" verify
+
+# Och ett bränsle som försvinner HELT lämnar ingen grupp för min() att se, så 7c
+# blir grön igen. 7d räknar bränslena i stället för att mäta dem.
+expect_fail "US gasoline series vanishes entirely" "verify 7d" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly WHERE fuel = 'gasoline';" verify
+
+expect_pass "missing fuel silent on a fixtures build" \
+  "UPDATE stg.build_meta SET strict = false;
+   DELETE FROM stg.retail_us_weekly WHERE fuel = 'gasoline';" verify
+
 # The gate must work in both directions: silencing check 7 on a fixtures build is
 # the whole reason it exists, so assert the silence too, not just the noise.
 expect_pass "crack staleness silent on a fixtures build" \

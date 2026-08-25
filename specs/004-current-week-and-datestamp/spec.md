@@ -102,7 +102,7 @@ the last daily observation; each chart states its own coverage.
 - **FR-308**: The build date MUST be recorded at build time and used both to set
   the axis bound and to check it, so `--verify-only` against an older database
   judges the axis by the day it was built rather than by today. Data staleness is
-  a separate question with its own checks (7, 7b, 16).
+  a separate question with its own checks (7, 7b, 7c, 16; 7c added 2026-08-25).
 
 ## Out of scope
 

@@ -105,14 +105,15 @@ jobs:
             # sjudagarssteg och slår till först vid 21: senare, inte tidigare.
             #
             # Vad raden INTE täcker, och det är avsiktligt kvar som ett hål:
-            #   - En enskild stannad serie, på två olika sätt. Har den en hård
-            #     färskhetskontroll (spot: verify 16, EU-retail: 7b) fälls
-            #     Refresh data och det här steget körs aldrig — inget if:
-            #     always(). Saknar den en, passerar den tyst: övriga serier rör
-            #     sig, diffen är icke-tom, och else-grenen committar som vanligt.
-            #   - EIA:s US-retailserie är den enda i den andra kategorin. Ingen
-            #     färskhetskontroll i verify.sql, ingen varning här. Ingenting
-            #     bevakar den i dag.
+            #   - En enskild stannad serie. Varje veckoserie har en hård
+            #     färskhetskontroll (spot: verify 16, EU-retail: 7b, US retail:
+            #     7c), och den fäller Refresh data — det här steget körs aldrig,
+            #     det har inget if: always(). Skulle en serie sakna kontroll
+            #     passerar den däremot tyst här: övriga rör sig, diffen är
+            #     icke-tom, och else-grenen committar som vanligt. Så var det
+            #     för US retail fram till 2026-08-25.
+            #   - En enskild region som slutar rapportera medan de andra
+            #     fortsätter. Se noten vid 7c för varför den inte bevakas.
             #   - Notifiering. Varningen syns för den som öppnar körningen.
             #     Röda körningar mejlas däremot ut, vilket är den starkare
             #     signalen. För publika repon (detta är ett) stänger GitHub av

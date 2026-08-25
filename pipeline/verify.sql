@@ -253,7 +253,9 @@ FROM (
 --    would start failing every CI run weeks after the fixtures were generated.
 --    Check 7b (EU retail) is NOT gated — the Oil Bulletin is fetched live in
 --    every mode, so a workbook that still parses but has stopped being updated
---    must fail CI rather than sail through it.
+--    must fail CI rather than sail through it. Check 7c (US retail) is gated for
+--    the same reason as 7: it comes from EIA, which is synthetic under
+--    --fixtures.
 --
 --    Slacken för crack är 21 dagar, inte 14 som för retail, och det är en följd
 --    av coverage-regeln nedan. EIA:s spotserie släpps en gång i veckan, på
@@ -280,6 +282,37 @@ SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
                     coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
                     coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly)::VARCHAR, 'none')))
 END AS "7b EU retail data fresh"
+;
+
+-- 7c. US retail har samma sorts kontroll som 7b, och fanns inte förrän
+--     2026-08-25. Serien saknade helt bevakning: ingen färskhetskontroll här,
+--     och heller ingen täckning i refresh.yml:s varning för noll dataändringar,
+--     som bara fäller när INGEN källa rört sig — de andra serierna håller
+--     diffen icke-tom och committen går igenom. En stannad EIA-retailserie
+--     kunde alltså publiceras platt hur länge som helst utan att något sa till.
+--
+--     Gränsen är 14 som för 7b, men steget är sju dagar: båda sidor är måndagar,
+--     så avståndet växer 0, 7, 14, 21 och > 14 fäller först vid 21 — tre
+--     uteblivna tisdagssläpp i rad. En snävare gräns (> 7, fäller vid 14) hade
+--     larmat en vecka tidigare men också vid en legitim kombination: ett bygge
+--     på en måndag, då EU-bulletinen publicerat veckan och EIA ännu inte, plus
+--     ett enda missat släpp. Flytta den med belägg, inte på känsla.
+--
+--     Regionserierna (stg.region_weekly, usregions.json) hämtas från samma
+--     pri/gnd-endpoint och släpps samtidigt, så en stannad hämtning fäller den
+--     här kontrollen också. Det som INTE täcks är en enskild region som slutar
+--     rapportera medan de andra fortsätter — max() över tabellen ser inte det,
+--     och ett per-regionprov hade i stället gjort bygget permanent rött den dag
+--     EIA lägger ner en delstatsserie. Kontrollerna 11b och 12 ser bara att
+--     serierna ligger på samma axel, vilket en stannad serie gör med nullor.
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
+                 - coalesce((SELECT max(week_start) FROM stg.retail_us_weekly
+                             WHERE usd_per_gal IS NOT NULL), DATE '1900-01-01') > 14
+  THEN error(format('verify 7c: US retail data stale - calendar ends {}, last observation {}',
+                    coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                    coalesce((SELECT max(week_start) FROM stg.retail_us_weekly
+                              WHERE usd_per_gal IS NOT NULL)::VARCHAR, 'none')))
+END AS "7c US retail data fresh"
 ;
 
 -- ---------------------------------------------------------------------------
@@ -399,10 +432,10 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
 --     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
---     källa rört sig — den jämför hela site/public/data — så en serie UTAN
---     färskhetskontroll går förbi både den och den här kontrollen. Spot fälls av
---     den här, EU-retail av 7b; EIA:s US-retailserie är den enda som ingen av
---     dem ser. Se refresh.yml för vad ett larm som täcker den skulle kosta.
+--     källa rört sig — den jämför hela site/public/data. Varje veckoserie har
+--     numera en hård kontroll i stället: spot här, EU-retail i 7b, US retail i
+--     7c (tillagd 2026-08-25, tills dess var den obevakad). Kvar utanför båda:
+--     en enskild region som slutar rapportera, se noten vid 7c.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

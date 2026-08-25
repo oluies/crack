@@ -163,6 +163,10 @@ Each assertion fails the run with a message naming what broke.
    Check 7b (EU retail) is **not** gated — the Oil Bulletin is fetched live in
    every mode, so a workbook that still parses but has stopped being updated
    must fail CI rather than sail through it.
+   Check 7c (US retail) is gated like 7, for the same reason: it comes from EIA.
+   It was added on 2026-08-25, when US retail turned out to be the one series no
+   invariant watched — and one the refresh workflow's zero-diff warning cannot
+   see either, since that fires only when no source at all has moved.
    Strictness is recorded in `stg.build_meta` at build time, not read from the
    current invocation: `--verify-only` re-checks a database an earlier run
    built, and deriving it from the current mode failed a fixtures build the

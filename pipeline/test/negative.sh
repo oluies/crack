@@ -332,6 +332,23 @@ expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
   "UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
+# 7c fanns inte förrän 2026-08-25: US retail var den enda serien utan
+# färskhetskontroll, och utan täckning i refresh.yml:s varning heller. Samma
+# grindning som check 7 — EIA är syntetisk under --fixtures — så samma tre prov:
+# fäller på ett strikt bygge, tiger på ett fixtures-bygge, och fäller även när
+# tabellen är HELT tom (max(week_start) NULL -> error(NULL) kastar inte).
+expect_fail "US retail gone stale (strict build)" "verify 7c" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly WHERE week_start > DATE '2026-01-01';" verify
+
+expect_pass "US staleness silent on a fixtures build" \
+  "UPDATE stg.build_meta SET strict = false;
+   DELETE FROM stg.retail_us_weekly WHERE week_start > DATE '2026-01-01';" verify
+
+expect_fail "retail_us_weekly emptied entirely (error(NULL))" "verify 7c" \
+  "UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly;" verify
+
 # The gate must work in both directions: silencing check 7 on a fixtures build is
 # the whole reason it exists, so assert the silence too, not just the noise.
 expect_pass "crack staleness silent on a fixtures build" \

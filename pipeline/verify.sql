@@ -470,21 +470,39 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
 --     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
 --     källa rört sig — den jämför hela site/public/data. De nationella
---     veckoserierna har hårda kontroller i stället: spot här, EU-retail i 7b,
---     US retail i 7c (tillagd 2026-08-25, tills dess var den obevakad).
+--     veckoserierna har hårda kontroller i stället: spot här (men bara på
+--     hämtningsnivå — se GRÄNS nedan), EU-retail i 7b, US retail i 7c per
+--     bränsle (tillagd 2026-08-25, tills dess var den obevakad).
 --     Regionserierna saknar hård kontroll helt — de hämtas i en egen förfrågan,
 --     så 7c ser dem bara i den mån de stannar samtidigt som de nationella.
 --     Se noten vid 7c.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.
+--
+--     Mäter mot build_meta.built_on, inte current_date. På ett live-bygge är de
+--     samma dag, men --verify-only läser en databas som byggdes en annan dag och
+--     current_date tillverkade då färskhetsfel ur kalendern — exakt det som
+--     check 1e:s not säger att built_on finns för att undvika. Det gör också att
+--     PIN_AGE i negative.sh biter här; mot current_date var den verkningslös.
+--
+--     GRÄNS SOM ÄR KVAR: max(obs_date) är tabellbrett, och stg.crack_daily bär
+--     tre series_key ur tre oberoende EIA-serier. Stannar RWTC ensam får
+--     us_ulsd_wti en svans av nullor medan us_ulsd_brent håller max färskt, och
+--     varken 13 (hoppar över NULL-ben), 14 eller export-check 9 (jämför längder)
+--     ser det. Samma form som det tabellbreda max() som togs bort ur 7c. Rätt
+--     åtgärd är minsta max per series_key över US-nycklarna — nwe_gasoil_brent
+--     måste hållas utanför, en tom ICE-stub är ett dokumenterat giltigt läge —
+--     plus en 7d-liknande räkning för en nyckel som försvinner helt. Inte gjort
+--     här: det är en egen ändring med egna prov, inte ett tillägg till den här.
 -- ---------------------------------------------------------------------------
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
-                 AND current_date - coalesce((SELECT max(obs_date) FROM stg.crack_daily
-                                              WHERE usd_per_bbl IS NOT NULL),
-                                             DATE '1900-01-01') > 20
-  THEN error(format('verify 16: daily crack data stale - today {}, last observation {}',
-                    current_date::VARCHAR,
+                 AND (SELECT built_on FROM stg.build_meta)
+                     - coalesce((SELECT max(obs_date) FROM stg.crack_daily
+                                 WHERE usd_per_bbl IS NOT NULL),
+                                DATE '1900-01-01') > 20
+  THEN error(format('verify 16: daily crack data stale - built {}, last observation {}',
+                    coalesce((SELECT built_on FROM stg.build_meta)::VARCHAR, 'none'),
                     coalesce((SELECT max(obs_date) FROM stg.crack_daily
                               WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
 END AS "16 daily crack data fresh"

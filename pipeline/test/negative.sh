@@ -326,8 +326,13 @@ expect_fail "FX hole in one week" "verify 6" \
 # PIN_AGE flyttar ned axeln OCH byggdagen till fixturedatans egen sista vecka, så
 # att åldern inte kan vara orsaken till att något fäller. Byggdagen måste följa
 # med: check 1e jämför axelns slut med byggveckan, och att bara klippa axeln vore
-# en annan korruption än den provet gäller. Prefixas på de prov som väntar sig en
-# kontroll EFTER 7/7c — de andra fäller på sin egen korruption ändå.
+# en annan korruption än den provet gäller.
+#
+# Prefixas på de prov som sätter strict = true OCH väntar sig en kontroll efter
+# 7/7c. Proven för 13, 14 och 15 väntar sig också en senare kontroll men lämnar
+# strict på fixtures-byggets false, och grindningen släcker 7, 7c, 7d och 16 helt
+# — det, inte deras egen korruption, är vad som skyddar dem. Sätter någon strict
+# i ett av dem behövs prefixet där också.
 PIN_AGE="CREATE OR REPLACE TEMP TABLE pin AS
    SELECT least((SELECT max(week_start) FROM stg.crack_weekly WHERE usd_per_bbl IS NOT NULL),
                 (SELECT min(mx) FROM (SELECT max(week_start) AS mx
@@ -352,8 +357,7 @@ expect_fail "EU retail gone stale (strict build)" "verify 7b" \
 
 # 7b must fire even on a non-strict build: the Oil Bulletin is live in every mode.
 expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
-  "$PIN_AGE
-   UPDATE stg.build_meta SET strict = false;
+  "UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 # 7c fanns inte förrän 2026-08-25: US retail var den enda serien utan

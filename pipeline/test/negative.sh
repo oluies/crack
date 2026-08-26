@@ -468,6 +468,25 @@ expect_fail "a day appears twice on the daily axis" "verify 15" \
 
 # Dagsserien är där färskhet faktiskt mäts — veckoserien slutar regelmässigt en
 # vecka tidigt av konstruktion, så check 7 kan inte göra det jobbet.
+# Ankaret i check 16 — built_on, inte current_date — har inget prov om det inte
+# finns ett som skiljer dem åt. Provet ovan tar bort allt efter 2024, ett gap på
+# år: det fäller likadant mot båda. Det här är motsatsen och det enda som fäller
+# en återgång: en databas byggd för åtta veckor sedan vars data var färsk DÅ.
+# Mot built_on är gapet högst sex dagar och allt är grönt; mot current_date vore
+# det över sextio och check 16 hade fällt data som var korrekt när den skrevs.
+# Samma form som "an axis built three weeks ago still verifies" gör för 1e, och
+# suitens enda strict = true som väntar sig grönt — den grindade halvan av 7, 7c,
+# 7d och 16 sågs annars aldrig annat än fällande.
+expect_pass "a database built eight weeks ago still verifies" \
+  "CREATE OR REPLACE TEMP TABLE cut AS
+     SELECT (max(week_start) - INTERVAL 56 DAY)::DATE AS d FROM stg.week_calendar;
+   DELETE FROM stg.week_calendar   WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.crack_daily     WHERE obs_date   > (SELECT d FROM cut);
+   DELETE FROM stg.crack_daily_ma  WHERE obs_date   > (SELECT d FROM cut);
+   DELETE FROM stg.day_axis        WHERE obs_date   > (SELECT d FROM cut);
+   UPDATE stg.build_meta SET built_on = (SELECT (d + INTERVAL 6 DAY)::DATE FROM cut),
+                             strict   = true;" verify
+
 expect_fail "daily data gone stale (strict build)" "verify 16" \
   "$PIN_AGE
    UPDATE stg.build_meta SET strict = true;

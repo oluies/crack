@@ -151,7 +151,12 @@ case "$MODE" in
     fetch_oilbulletin
     ;;
   verify)
-    say "verify-only"
+    # Byggdagen sägs ut: efter att check 16 flyttades till built_on är varje
+  # färskhetskontroll byggrelativ, och ingen svarar längre på "hur gammal är den
+  # HÄR databasen". Utan den här raden kan --verify-only mot ett halvårsgammalt
+  # bygge skriva "alla invarianter gröna" utan att någonstans nämna årtalet.
+  say "verify-only (databasen byggd $(duckdb "$DB" -noheader -list \
+        -c 'SELECT built_on FROM stg.build_meta;' 2>/dev/null || echo 'okänt'))"
     ;;
 esac
 

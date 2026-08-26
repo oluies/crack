@@ -125,7 +125,10 @@ END AS "1d build_meta usable";
 --     --verify-only kör de här invarianterna mot en databas som byggdes en
 --     annan dag, och mot dagens datum hade en helt korrekt axel fällts så fort
 --     kalendern hunnit vidare en vecka. Att datan är gammal är en annan fråga
---     och har egna kontroller (7, 7b, 7c, 16).
+--     och har egna kontroller (7, 7b, 7c, 16). Alla fyra mäter datans ålder
+--     RELATIVT byggdagen; ingen mäter databasens egen ålder, så ett gammalt
+--     bygge som var korrekt när det skrevs är grönt här. --verify-only skriver
+--     ut byggdagen av just det skälet.
 SELECT CASE
   WHEN (SELECT max(week_start) FROM stg.week_calendar)
        > date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE

@@ -87,11 +87,18 @@ Other conventions:
   mean of the trailing seven **calendar** days — one trading week in steady state,
   shortening honestly over a holiday, where a seven-*observation* window would
   quietly reach nine calendar days back and still call itself "7-day".
-- **EIA spot runs about a week behind.** Nothing in the pipeline or its schedule
-  changes that; it is a property of the source. `meta.generated` says when the
-  pipeline ran and nothing about how old the data is, so the daily view prints the
-  last observation date and the lag beside it rather than letting the two be
-  confused.
+- **EIA spot is a weekly release, and the lag depends on when you sample it.**
+  The daily series drops on Wednesdays carrying through the prior Tuesday, so it
+  is about a day behind just after a release and eight days behind just before
+  the next one. An earlier note here called the week-long lag a property of the
+  source that no schedule could touch; that was measured hours before a release,
+  and the swing is real. `refresh.yml` now runs Wednesday evenings to sample near
+  the fresh end, and the freshness invariants stay wide because they fail the
+  whole build — they are there for a source that has stopped delivering, not for a
+  run that landed at the stale end of the cycle. What no schedule fixes is that a lag exists at all, so
+  `meta.generated` — when the pipeline ran — still says nothing about how old the
+  data is, and the daily view prints the last observation date and the lag beside
+  it rather than letting the two be confused.
 - **Oil Bulletin prices are already in EUR** per 1000 litres for every country,
   and are stored as EUR/L. The workbook's `{CC}_exchange_rate` columns are *not*
   applied — doing so would divide Swedish prices by eleven. An invariant check
@@ -157,9 +164,13 @@ than no check, because it reports green and is believed.
 - `.github/workflows/ci.yml` — on push and pull request: compile the frontend, run
   the pipeline against fixtures, run the negative tests, and run the headless
   frontend smoke test.
-- `.github/workflows/refresh.yml` — weekly: run the pipeline for real, commit
-  changed JSON, build, and deploy to Pages. A run that changes nothing commits
-  nothing.
+- `.github/workflows/refresh.yml` — Wednesdays 22:00 UTC, after both EIA release
+  calendars; the EU bulletin has no published release time and usually, but not
+  always, lands by then. Runs the pipeline for real, commits changed JSON, builds,
+  and deploys to Pages. A run that changes nothing commits nothing — which is also
+  what a badly timed schedule looks like, so a scheduled run that moves nothing
+  now raises a warning annotation instead of passing in silence. Check the release
+  calendars in the cron comment before suspecting the fetch.
 
 The Oil Bulletin download path is a UUID the Commission reissues when it
 republishes. It lives in `pipeline/sources.env`; when the download starts failing,

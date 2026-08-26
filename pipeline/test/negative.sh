@@ -315,6 +315,33 @@ expect_fail "crack missing the 42 gal/bbl factor" "verify 5" \
 expect_fail "FX hole in one week" "verify 6" \
   "DELETE FROM stg.fx_weekly WHERE ccy = 'SEK' AND week_start = DATE '2024-03-04';" verify
 
+# Fixtures är en frusen ögonblicksbild medan week_calendar följer byggdagen, så
+# gapet mot dem växer en vecka i veckan. De grindade färskhetskontrollerna börjar
+# därför fälla av sig själva några veckor efter att fixtures gjordes — och de gör
+# det mitt i ett prov som väntar sig en SENARE kontroll, så utfallet blir "failed,
+# but not with verify 7c:" och diagnosen pekar på fel ställe. Mätt 2026-08-26 var
+# marginalen noll veckor kvar: axeln låg på 08-17, check 7:s gap var 14 av 21 och
+# 7c:s 7 av 14, och en byggvecka till hade fällt båda.
+#
+# PIN_AGE flyttar ned axeln OCH byggdagen till fixturedatans egen sista vecka, så
+# att åldern inte kan vara orsaken till att något fäller. Byggdagen måste följa
+# med: check 1e jämför axelns slut med byggveckan, och att bara klippa axeln vore
+# en annan korruption än den provet gäller.
+#
+# Prefixas på de prov som sätter strict = true OCH väntar sig en kontroll efter
+# 7/7c. Proven för 13, 14 och 15 väntar sig också en senare kontroll men lämnar
+# strict på fixtures-byggets false, och grindningen släcker 7, 7c, 7d och 16 helt
+# — det, inte deras egen korruption, är vad som skyddar dem. Sätter någon strict
+# i ett av dem behövs prefixet där också.
+PIN_AGE="CREATE OR REPLACE TEMP TABLE pin AS
+   SELECT least((SELECT max(week_start) FROM stg.crack_weekly WHERE usd_per_bbl IS NOT NULL),
+                (SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                      FROM stg.retail_us_weekly
+                                      WHERE usd_per_gal IS NOT NULL
+                                      GROUP BY fuel))) AS d;
+ DELETE FROM stg.week_calendar WHERE week_start > (SELECT d FROM pin);
+ UPDATE stg.build_meta SET built_on = (SELECT (d + INTERVAL 6 DAY)::DATE FROM pin);"
+
 # strict lives in build_meta, not in the variable — that is the point of it,
 # so a strict build has to be simulated in the copy rather than in the preamble.
 expect_fail "crack data gone stale (strict build)" "verify 7" \
@@ -324,13 +351,55 @@ expect_fail "crack data gone stale (strict build)" "verify 7" \
 # SRC_DB kommer från --fixtures, alltså strict=false. Utan detta vore de två
 # 7b-proven identiska och 7b aldrig prövad på ett strikt bygge.
 expect_fail "EU retail gone stale (strict build)" "verify 7b" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 # 7b must fire even on a non-strict build: the Oil Bulletin is live in every mode.
 expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
   "UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
+
+# 7c fanns inte förrän 2026-08-25: US retail var den enda serien utan
+# färskhetskontroll, och utan täckning i refresh.yml:s varning heller. Samma
+# grindning som check 7 — EIA är syntetisk under --fixtures — så samma tre prov:
+# fäller på ett strikt bygge, tiger på ett fixtures-bygge, och fäller även när
+# tabellen är HELT tom (max(week_start) NULL -> error(NULL) kastar inte).
+expect_fail "US retail gone stale (strict build)" "verify 7c" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly WHERE week_start > DATE '2026-01-01';" verify
+
+expect_pass "US staleness silent on a fixtures build" \
+  "UPDATE stg.build_meta SET strict = false;
+   DELETE FROM stg.retail_us_weekly WHERE week_start > DATE '2026-01-01';" verify
+
+expect_fail "retail_us_weekly emptied entirely (error(NULL))" "verify 7c" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly;" verify
+
+# Tabellen bär två oberoende EIA-serier. Ett tabellbrett max() hade hållits
+# färskt av den ena medan den andra stannade, och ingen annan kontroll ser det:
+# export-check 10 kräver bara att len(values) == len(weeks), vilket en svans av
+# nullor uppfyller. Därför mäter 7c minsta max per bränsle — och därför finns
+# det här provet, som före den ändringen var osynligt för hela sviten.
+expect_fail "only US diesel goes stale (strict build)" "verify 7c" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly
+    WHERE fuel = 'diesel' AND week_start > DATE '2026-01-01';" verify
+
+# Och ett bränsle som försvinner HELT lämnar ingen grupp för min() att se, så 7c
+# blir grön igen. 7d räknar bränslena i stället för att mäta dem.
+expect_fail "US gasoline series vanishes entirely" "verify 7d" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.retail_us_weekly WHERE fuel = 'gasoline';" verify
+
+expect_pass "missing fuel silent on a fixtures build" \
+  "UPDATE stg.build_meta SET strict = false;
+   DELETE FROM stg.retail_us_weekly WHERE fuel = 'gasoline';" verify
 
 # The gate must work in both directions: silencing check 7 on a fixtures build is
 # the whole reason it exists, so assert the silence too, not just the noise.
@@ -399,8 +468,59 @@ expect_fail "a day appears twice on the daily axis" "verify 15" \
 
 # Dagsserien är där färskhet faktiskt mäts — veckoserien slutar regelmässigt en
 # vecka tidigt av konstruktion, så check 7 kan inte göra det jobbet.
+# Ankaret i check 16 — built_on, inte current_date — har inget prov om det inte
+# finns ett som skiljer dem åt. Provet ovan tar bort allt efter 2024, ett gap på
+# år: det fäller likadant mot båda. Det här är motsatsen och det enda som fäller
+# en återgång: en databas byggd för åtta veckor sedan vars data var färsk DÅ.
+# Mot built_on är gapet högst sex dagar och allt är grönt; mot current_date vore
+# det över sextio och check 16 hade fällt data som var korrekt när den skrevs.
+# Samma form som "an axis built three weeks ago still verifies" gör för 1e, och
+# suitens enda strict = true som väntar sig grönt — den grindade halvan av 7, 7c,
+# 7d och 16 sågs annars aldrig annat än fällande.
+# cut ankras i DATAN, inte i kalendern. week_calendar följer byggdagen och
+# flyttar sig varje vecka medan fixtures står stilla: en cut räknad enbart ur
+# axeln slutar till slut bita i de frusna dagstabellerna, gapet växer en vecka i
+# veckan och provet hade blivit rött omkring november — samma åldersberoende som
+# PIN_AGE finns för att ta bort, återinfört i det enda prov vars hela värde är
+# att det förblir grönt. Med least() mot dagsdatan biter klippet alltid.
+#
+# Veckotabellerna klipps med: utan dem ligger veckoobservationer åtta veckor
+# FRAMFÖR sin egen axel, ett läge inget bygge kan producera, och 7/7c/7d blir
+# gröna på ett negativt gap i stället för på ett konsekvent gammalt bygge.
+# retail_eu_weekly och fx_weekly lämnas: 7b är ogrindad och läser live-data, och
+# check 6 itererar bara den klippta kalendern. Råtabellerna (spot_daily,
+# retail_us_raw, ob_parsed) lämnas också, och spot_daily är det medvetna valet
+# av två dåliga: klipps den vid samma gräns har veckan som BÖRJAR på cut bara
+# måndagen kvar, alltså en handelsdag mot min_week_obs tre, och check 13 fäller
+# på riggen i stället för på datan — provat, den blir röd. Att i stället flytta
+# veckotabellerna en vecka till hade gjort korruptionen mer omfattande än det
+# den ska visa. Ingen kontroll jämför en råtabells räckvidd mot axeln; den dag
+# någon gör det behöver det här provet skrivas om.
+#
+# Ankaret filtrerar usd_per_bbl IS NOT NULL, precis som check 16. Ofiltrerat
+# skiljer de sig i just det läge repot dokumenterar som stött: med en riktig
+# ICE-gasoilfil når crack_daily fram till idag medan nwe_gasoil_brent är NULL
+# förbi spotdatan, least() väljer då kalendergrenen och klippet slutar bita.
+expect_pass "a database built eight weeks ago still verifies" \
+  "CREATE OR REPLACE TEMP TABLE cut AS
+     SELECT (least((SELECT max(week_start) FROM stg.week_calendar),
+                   (SELECT date_trunc('week', max(obs_date))::DATE FROM stg.crack_daily
+                     WHERE usd_per_bbl IS NOT NULL))
+             - INTERVAL 56 DAY)::DATE AS d;
+   DELETE FROM stg.week_calendar   WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.crack_daily     WHERE obs_date   > (SELECT d FROM cut);
+   DELETE FROM stg.crack_daily_ma  WHERE obs_date   > (SELECT d FROM cut);
+   DELETE FROM stg.day_axis        WHERE obs_date   > (SELECT d FROM cut);
+   DELETE FROM stg.crack_weekly    WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.legs_weekly     WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.retail_us_weekly WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.region_weekly   WHERE week_start > (SELECT d FROM cut);
+   UPDATE stg.build_meta SET built_on = (SELECT (d + INTERVAL 6 DAY)::DATE FROM cut),
+                             strict   = true;" verify
+
 expect_fail "daily data gone stale (strict build)" "verify 16" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.crack_daily    WHERE obs_date > DATE '2024-01-01';
    DELETE FROM stg.crack_daily_ma WHERE obs_date > DATE '2024-01-01';" verify
 

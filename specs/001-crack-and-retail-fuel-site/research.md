@@ -27,8 +27,14 @@ Pass `--globoff` / `-g`. This bites in shell scripts, not in DuckDB's HTTP clien
 | `EMD_EPD2D_PTE_NUS_DPG` | `petroleum/pri/gnd` | US on-highway diesel retail | USD/gal |
 
 Spot series live under `pri/spt` and are daily; the retail series live under
-`pri/gnd` and are weekly (Monday). These are two different routes — a single call
-cannot serve both.
+`pri/gnd` and are weekly, keyed to Monday. These are two different routes — a
+single call cannot serve both.
+
+Monday is the period key, not the release day, and the two are easy to conflate:
+EIA publishes the retail series on Tuesday and the daily spot series in a weekly
+Wednesday drop carrying through the prior Tuesday. A schedule derived from the
+period key samples both before they publish — see the cron comment in
+`.github/workflows/refresh.yml`.
 
 Response envelope is `{"response":{"data":[{"period","series","value",...}]}}`, so
 `read_json_auto` needs the `response.data` path unnested rather than the document

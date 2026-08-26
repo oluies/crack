@@ -37,8 +37,12 @@ aggregates masquerading as prefixes).
 | `fuel` | `VARCHAR` | `diesel` \| `gasoline` |
 | `usd_per_gal` | `DOUBLE` | As published |
 
-EIA already publishes these weekly on Mondays; the week key is a `date_trunc`, not
-an aggregation, and a duplicate would signal an upstream change — asserted.
+EIA already publishes these as weekly observations keyed to Monday; the week key is
+a `date_trunc`, not an aggregation, and a duplicate would signal an upstream change
+— asserted. Monday is the period, not the release day: EIA releases this series on
+Tuesday, and the daily spot series on Wednesday. Deriving a refresh schedule from
+the period key samples both before they publish — see the cron comment in
+`.github/workflows/refresh.yml`.
 
 ### `retail_eu_weekly` — from `20_oilbulletin.sql`
 
@@ -159,6 +163,15 @@ Each assertion fails the run with a message naming what broke.
    Check 7b (EU retail) is **not** gated — the Oil Bulletin is fetched live in
    every mode, so a workbook that still parses but has stopped being updated
    must fail CI rather than sail through it.
+   Check 7c (US retail) is gated like 7, for the same reason: it comes from EIA.
+   It was added on 2026-08-25, when US retail turned out to be the one series no
+   invariant watched — and one the refresh workflow's zero-diff warning cannot
+   see either, since that fires only when no source at all has moved. It measures
+   the smallest per-fuel maximum, because this table carries two independent EIA
+   series and a table-wide `max()` would stay fresh on one while the other
+   stalled; check 7d counts the fuels, since a fuel that disappears entirely
+   leaves no group for that minimum to see. The regional series are fetched in a
+   separate request and have no freshness check of their own.
    Strictness is recorded in `stg.build_meta` at build time, not read from the
    current invocation: `--verify-only` re-checks a database an earlier run
    built, and deriving it from the current mode failed a fixtures build the

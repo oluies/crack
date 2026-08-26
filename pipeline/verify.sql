@@ -50,7 +50,8 @@ WITH required_tables(t) AS (
   VALUES ('build_meta'), ('week_calendar'), ('day_axis'), ('eu27'),
          ('spot_daily'), ('legs_weekly'), ('crack_weekly'),
          ('crack_daily'), ('crack_daily_ma'),
-         ('ob_parsed'), ('retail_eu_weekly'), ('retail_us_raw'), ('fx_weekly')
+         ('ob_parsed'), ('retail_eu_weekly'), ('retail_us_raw'),
+         ('retail_us_weekly'), ('region_weekly'), ('fx_weekly')
 ),
 required_columns(t, c) AS (
   VALUES ('build_meta', 'strict'), ('build_meta', 'min_week_obs'), ('build_meta', 'built_on')
@@ -124,7 +125,10 @@ END AS "1d build_meta usable";
 --     --verify-only kör de här invarianterna mot en databas som byggdes en
 --     annan dag, och mot dagens datum hade en helt korrekt axel fällts så fort
 --     kalendern hunnit vidare en vecka. Att datan är gammal är en annan fråga
---     och har egna kontroller (7, 7b, 16).
+--     och har egna kontroller (7, 7b, 7c, 16). Alla fyra mäter datans ålder
+--     RELATIVT byggdagen; ingen mäter databasens egen ålder, så ett gammalt
+--     bygge som var korrekt när det skrevs är grönt här. --verify-only skriver
+--     ut byggdagen av just det skälet.
 SELECT CASE
   WHEN (SELECT max(week_start) FROM stg.week_calendar)
        > date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE
@@ -253,14 +257,19 @@ FROM (
 --    would start failing every CI run weeks after the fixtures were generated.
 --    Check 7b (EU retail) is NOT gated — the Oil Bulletin is fetched live in
 --    every mode, so a workbook that still parses but has stopped being updated
---    must fail CI rather than sail through it.
+--    must fail CI rather than sail through it. Check 7c (US retail) is gated for
+--    the same reason as 7: it comes from EIA, which is synthetic under
+--    --fixtures.
 --
 --    Slacken för crack är 21 dagar, inte 14 som för retail, och det är en följd
---    av coverage-regeln nedan: EIA ligger ~8 dagar efter, så den sista
---    kalenderveckan har regelmässigt för få handelsdagar och publiceras som
---    NULL. Ett normalläge är alltså redan en veckas glapp, och 14 dagar hade
---    fällt bygget på en enda sen EIA-publicering. Dagsserien är stället där
---    färskhet faktiskt mäts — se verify 16.
+--    av coverage-regeln nedan. EIA:s spotserie släpps en gång i veckan, på
+--    onsdagar, och bär till och med tisdagen före — eftersläpningen pendlar
+--    alltså mellan en och åtta dagar beroende på var i cykeln bygget landar.
+--    Även i det färskaste läget har den innevarande kalenderveckan bara måndag
+--    och tisdag, färre handelsdagar än coverage-golvet, och publiceras som NULL.
+--    Ett normalläge är alltså redan en veckas glapp, och 14 dagar hade fällt
+--    bygget på en enda sen EIA-publicering. Dagsserien är stället där färskhet
+--    faktiskt mäts — se verify 16.
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT max(week_start) FROM stg.crack_weekly
                              WHERE usd_per_bbl IS NOT NULL), DATE '1900-01-01') > 21
@@ -277,6 +286,73 @@ SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
                     coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
                     coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly)::VARCHAR, 'none')))
 END AS "7b EU retail data fresh"
+;
+
+-- 7c. US retail har samma sorts kontroll som 7b, och fanns inte förrän
+--     2026-08-25. Serien saknade helt bevakning: ingen färskhetskontroll här,
+--     och heller ingen täckning i refresh.yml:s varning för noll dataändringar,
+--     som bara fäller när INGEN källa rört sig — de andra serierna håller
+--     diffen icke-tom och committen går igenom. En stannad EIA-retailserie
+--     kunde alltså publiceras platt hur länge som helst utan att något sa till.
+--
+--     Gränsen är 14 som för 7b, men steget är sju dagar: båda sidor är måndagar,
+--     så avståndet växer 0, 7, 14, 21 och > 14 fäller först vid 21 — tre
+--     uteblivna tisdagssläpp i rad. En snävare gräns (> 7, fäller vid 14) hade
+--     larmat en vecka tidigare men också vid en legitim kombination: ett bygge
+--     på en måndag, då EU-bulletinen publicerat veckan och EIA ännu inte, plus
+--     ett enda missat släpp. Flytta den med belägg, inte på känsla.
+--
+--     Mätningen är minsta max PER BRÄNSLE, inte max över tabellen: här ligger
+--     två oberoende EIA-serier, gasoline och diesel, och stannar den ena hade
+--     ett tabellbrett max hållits färskt av den andra i all evighet. Ett bränsle
+--     som försvinner helt lämnar ingen grupp alls — det fångar 7d.
+--
+--     Regionserierna (stg.region_weekly, usregions.json) täcks INTE av den här
+--     kontrollen. De hämtas i en egen förfrågan med en egen serielista
+--     (EIA_REGION_SERIES), så 7c ser dem bara i den mån de stannar samtidigt som
+--     de nationella. Fryser regionuppsättningen medan de nationella fortsätter
+--     är 7c grön, region_weekly håller axeln med gamla veckor, och det enda som
+--     står emellan är 60_verify_export check 8, som avvisar en TOM regionlista —
+--     inte en fryst. Detsamma gäller en enskild region som slutar rapportera.
+--     Ett per-regionprov hade fällt det, till priset av ett permanent rött bygge
+--     den dag EIA lägger ner en delstatsserie; 11b och 12 ser bara att serierna
+--     ligger på samma axel, vilket en stannad serie gör med nullor.
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT max(week_start) FROM stg.week_calendar)
+                 - coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                                  FROM stg.retail_us_weekly
+                                                  WHERE usd_per_gal IS NOT NULL
+                                                  GROUP BY fuel)), DATE '1900-01-01') > 14
+  THEN error(format('verify 7c: US retail data stale - calendar ends {}, oldest fuel ends {}',
+                    coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
+                    coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                                   FROM stg.retail_us_weekly
+                                                   WHERE usd_per_gal IS NOT NULL
+                                                   GROUP BY fuel))::VARCHAR, 'none')))
+END AS "7c US retail data fresh"
+;
+
+-- 7d. Båda US-bränslen finns över huvud taget.
+--
+--     7c mäter minsta max PER BRÄNSLE, vilket är hela poängen: tabellen bär två
+--     oberoende EIA-serier (gasoline, diesel) och ett max() över alltihop hade
+--     hållits färskt av den ena medan den andra stannade. Men ett bränsle som
+--     försvinner HELT lämnar ingen grupp kvar för min() att se, och då är 7c
+--     grön igen. Därför den här: bränslena räknas, de mäts inte.
+--
+--     Samma WHERE-villkor som 7c, med flit. Räknade den här obetingat vore
+--     mängderna olika: ett bränsle som finns men bara med NULL-priser lämnar
+--     ingen grupp åt 7c och räknas ändå av 7d, och båda rapporterar grönt.
+--     Onåbart i dag — retail_us_raw filtrerar bort NULL — men det är precis den
+--     sortens filterberoende som filhuvudet säger ska prövas om när ett filter
+--     flyttar.
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
+                 AND (SELECT count(DISTINCT fuel) FROM stg.retail_us_weekly
+                      WHERE usd_per_gal IS NOT NULL) < 2
+  THEN error(format('verify 7d: US retail is missing a fuel - present: {}',
+                    coalesce((SELECT string_agg(DISTINCT fuel, ', ')
+                              FROM stg.retail_us_weekly
+                              WHERE usd_per_gal IS NOT NULL), 'none')))
+END AS "7d US retail covers both fuels"
 ;
 
 -- ---------------------------------------------------------------------------
@@ -386,19 +462,52 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 -- 16. Dagsdatan är färsk.
 --
 --     Här, inte i check 7, är färskheten meningsfull: dagsserien slutar på EIA:s
---     sista publicerade dag utan utjämning emellan. EIA ligger normalt ~8 dagar
---     efter, så 20 dagar ger gott om marginal för en helg plus en sen
---     publicering, men fäller en källa som slutat leverera.
+--     sista publicerade dag utan utjämning emellan. Släppet kommer på onsdagar
+--     och bär till och med tisdagen före, så eftersläpningen är en dag strax
+--     efter ett släpp och åtta strax före nästa. 20 dagar rymmer alltså två helt
+--     uteblivna släpp innan något faller ut.
+--
+--     Avsiktligt vitt, inte kalibrerat mot slotten: den här kontrollen fäller
+--     hela bygget (.bail on) och stoppar deployen, så den är till för en källa
+--     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
+--     cykeln. Det senare syns i stället som varningen på noll dataändringar i
+--     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
+--     källa rört sig — den jämför hela site/public/data. De nationella
+--     veckoserierna har hårda kontroller i stället, men bara US retail (7c/7d)
+--     mäts per serie. Spot här och EU-retail i 7b mäts båda med ett tabellbrett
+--     max — se GRÄNS nedan, och notera att 7b:s tabell är den bredaste av dem
+--     alla: 27 länder gånger två bränslen gånger med/utan skatt, med check 3 som
+--     enda kontroll per land och den scopad till diesel med skatt.
+--     Regionserierna saknar hård kontroll helt — de hämtas i en egen förfrågan,
+--     så 7c ser dem bara i den mån de stannar samtidigt som de nationella.
+--     Se noten vid 7c.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.
+--
+--     Mäter mot build_meta.built_on, inte current_date. På ett live-bygge är de
+--     samma dag, men --verify-only läser en databas som byggdes en annan dag och
+--     current_date tillverkade då färskhetsfel ur kalendern — exakt det som
+--     check 1e:s not säger att built_on finns för att undvika. Det gör också att
+--     PIN_AGE i negative.sh biter här; mot current_date var den verkningslös.
+--
+--     GRÄNS SOM ÄR KVAR: max(obs_date) är tabellbrett, och stg.crack_daily bär
+--     tre series_key ur tre oberoende EIA-serier. Stannar RWTC ensam får
+--     us_ulsd_wti en svans av nullor medan us_ulsd_brent håller max färskt, och
+--     varken 13 (hoppar över NULL-ben), 14 eller export-check 9 (jämför längder)
+--     ser det. Samma form som det tabellbreda max() som togs bort ur 7c. Rätt
+--     åtgärd är minsta max per series_key över US-nycklarna — nwe_gasoil_brent
+--     måste hållas utanför, en tom ICE-stub är ett dokumenterat giltigt läge —
+--     plus en 7d-liknande räkning för en nyckel som försvinner helt. Inte gjort
+--     här: det är en egen ändring med egna prov, inte ett tillägg till den här.
 -- ---------------------------------------------------------------------------
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
-                 AND current_date - coalesce((SELECT max(obs_date) FROM stg.crack_daily
-                                              WHERE usd_per_bbl IS NOT NULL),
-                                             DATE '1900-01-01') > 20
-  THEN error(format('verify 16: daily crack data stale - today {}, last observation {}',
-                    current_date::VARCHAR,
+                 AND (SELECT built_on FROM stg.build_meta)
+                     - coalesce((SELECT max(obs_date) FROM stg.crack_daily
+                                 WHERE usd_per_bbl IS NOT NULL),
+                                DATE '1900-01-01') > 20
+  THEN error(format('verify 16: daily crack data stale - built {}, last observation {}',
+                    coalesce((SELECT built_on FROM stg.build_meta)::VARCHAR, 'none'),
                     coalesce((SELECT max(obs_date) FROM stg.crack_daily
                               WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
 END AS "16 daily crack data fresh"

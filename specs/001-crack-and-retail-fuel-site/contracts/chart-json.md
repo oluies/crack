@@ -244,8 +244,8 @@ one is a partial mean; that is what the coverage floor in
 [the weekly-coverage section](#weekly-coverage-feature-003) governs.
 
 The floor matters as much as the cap. If a survey stalls, the axis keeps
-advancing and `verify 7`/`7b` see the gap widen; an axis that tracked the stalled
-source would shorten in step with it and report itself fresh. `verify 1e` asserts
+advancing and `verify 7`/`7b`/`7c` see the gap widen; an axis that tracked the
+stalled source would shorten in step with it and report itself fresh. `verify 1e` asserts
 both bounds, because an axis that is merely wrong still looks entirely normal.
 
 **A consequence worth stating: the axis is no longer the coverage.** The crack

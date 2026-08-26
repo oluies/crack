@@ -120,7 +120,10 @@ nothing.
 1. **Given** the weekly cron fires, **When** upstream data has advanced, **Then**
    refreshed JSON is committed and the site redeploys.
 2. **Given** the cron fires with no upstream change, **When** the pipeline completes,
-   **Then** no commit is made.
+   **Then** no commit is made — and on the scheduled trigger the run also raises a
+   warning annotation, because a slot placed after both EIA releases should always
+   see those series advance, so nothing moving means the schedule or a source needs
+   looking at. The annotation is visible on the run, not pushed anywhere.
 3. **Given** an upstream source is unreachable, **When** the pipeline fails, **Then**
    the previously published data stays live and the workflow reports failure.
 
@@ -180,9 +183,14 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
 ### Edge Cases
 
-- **Sources disagree on the week.** EIA spot prices are daily, EIA retail is weekly
-  on Mondays, and the Oil Bulletin publishes weekly on Mondays covering the prior
-  week. All observations are bucketed to an ISO week and keyed to that week's Monday.
+- **Sources disagree on the week.** EIA spot prices are daily, EIA retail is a
+  weekly observation keyed to Monday, and the Oil Bulletin is a weekly Monday
+  survey covering the prior week. Those are the periods, not the release days,
+  and the two were conflated here until 2026-08-25: EIA releases the retail
+  series on Tuesday and the spot series on Wednesday (carrying through the prior
+  Tuesday), and the bulletin workbook appears somewhere Monday to Wednesday. The
+  dated evidence, and what it means for the refresh slot, is in the cron comment
+  in `.github/workflows/refresh.yml`. All observations are bucketed to an ISO week and keyed to that week's Monday.
   A partial week is caught by the coverage floor on daily-sampled sources rather than
   by dropping the current week, and a current week a survey has already published is
   kept — see the amendment on FR-007.
@@ -290,7 +298,8 @@ in its own unit, and the axes align at a common baseline rather than floating.
 
 - **FR-020**: A weekly scheduled workflow MUST run the pipeline, commit changed JSON,
   build the frontend, and deploy to GitHub Pages, committing nothing when no data
-  changed.
+  changed, and raising a warning annotation when the scheduled trigger produces no
+  change at all.
 - **FR-021**: A CI workflow MUST run on push and compile the frontend and validate
   the pipeline SQL without requiring an API key.
 - **FR-022**: The README MUST document every source, its licence, and the ICE gasoil

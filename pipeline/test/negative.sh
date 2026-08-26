@@ -477,13 +477,31 @@ expect_fail "a day appears twice on the daily axis" "verify 15" \
 # Samma form som "an axis built three weeks ago still verifies" gör för 1e, och
 # suitens enda strict = true som väntar sig grönt — den grindade halvan av 7, 7c,
 # 7d och 16 sågs annars aldrig annat än fällande.
+# cut ankras i DATAN, inte i kalendern. week_calendar följer byggdagen och
+# flyttar sig varje vecka medan fixtures står stilla: en cut räknad enbart ur
+# axeln slutar till slut bita i de frusna dagstabellerna, gapet växer en vecka i
+# veckan och provet hade blivit rött omkring november — samma åldersberoende som
+# PIN_AGE finns för att ta bort, återinfört i det enda prov vars hela värde är
+# att det förblir grönt. Med least() mot dagsdatan biter klippet alltid.
+#
+# Veckotabellerna klipps med: utan dem ligger veckoobservationer åtta veckor
+# FRAMFÖR sin egen axel, ett läge inget bygge kan producera, och 7/7c/7d blir
+# gröna på ett negativt gap i stället för på ett konsekvent gammalt bygge.
+# retail_eu_weekly och fx_weekly lämnas: 7b är ogrindad och läser live-data, och
+# check 6 itererar bara den klippta kalendern.
 expect_pass "a database built eight weeks ago still verifies" \
   "CREATE OR REPLACE TEMP TABLE cut AS
-     SELECT (max(week_start) - INTERVAL 56 DAY)::DATE AS d FROM stg.week_calendar;
+     SELECT (least((SELECT max(week_start) FROM stg.week_calendar),
+                   (SELECT date_trunc('week', max(obs_date))::DATE FROM stg.crack_daily))
+             - INTERVAL 56 DAY)::DATE AS d;
    DELETE FROM stg.week_calendar   WHERE week_start > (SELECT d FROM cut);
    DELETE FROM stg.crack_daily     WHERE obs_date   > (SELECT d FROM cut);
    DELETE FROM stg.crack_daily_ma  WHERE obs_date   > (SELECT d FROM cut);
    DELETE FROM stg.day_axis        WHERE obs_date   > (SELECT d FROM cut);
+   DELETE FROM stg.crack_weekly    WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.legs_weekly     WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.retail_us_weekly WHERE week_start > (SELECT d FROM cut);
+   DELETE FROM stg.region_weekly   WHERE week_start > (SELECT d FROM cut);
    UPDATE stg.build_meta SET built_on = (SELECT (d + INTERVAL 6 DAY)::DATE FROM cut),
                              strict   = true;" verify
 

@@ -152,11 +152,19 @@ case "$MODE" in
     ;;
   verify)
     # Byggdagen sägs ut: efter att check 16 flyttades till built_on är varje
-  # färskhetskontroll byggrelativ, och ingen svarar längre på "hur gammal är den
-  # HÄR databasen". Utan den här raden kan --verify-only mot ett halvårsgammalt
-  # bygge skriva "alla invarianter gröna" utan att någonstans nämna årtalet.
-  say "verify-only (databasen byggd $(duckdb "$DB" -noheader -list \
-        -c 'SELECT built_on FROM stg.build_meta;' 2>/dev/null || echo 'okänt'))"
+    # färskhetskontroll byggrelativ, och ingen svarar längre på "hur gammal är
+    # den HÄR databasen". Utan den här raden kan --verify-only mot ett
+    # halvårsgammalt bygge skriva "alla invarianter gröna" utan att någonstans
+    # nämna årtalet.
+    #
+    # -readonly av samma skäl som check-build-pairing.sh: en skrivbar öppning
+    # tar exklusivt lås och kan checkpointa på plats. Och coalesce runt en
+    # skalär subquery, inte runt kolumnen: ett tomt build_meta ger noll rader
+    # och duckdb skriver då en tom rad med exitkod 0, så ett || på exitkoden
+    # hade inte fångat det — meddelandet hade blivit "byggd )".
+    say "verify-only (databasen byggd $(duckdb -readonly "$DB" -noheader -list \
+          -c "SELECT coalesce((SELECT built_on FROM stg.build_meta)::VARCHAR, 'okänt');" \
+          2>/dev/null || echo 'okänt'))"
     ;;
 esac
 

@@ -105,17 +105,20 @@ jobs:
             # sjudagarssteg och slår till först vid 21: senare, inte tidigare.
             #
             # Vad raden INTE täcker, och det är avsiktligt kvar som ett hål:
-            #   - En enskild stannad serie, om den bevakas per serie. EU-retail
-            #     (7b) och US retail (7c, per bränsle) är det, och då fäller
-            #     Refresh data — det här steget körs aldrig, det har inget
-            #     if: always(). Saknas den granulariteten passerar stoppet tyst
-            #     här i stället: övriga serier rör sig, diffen är icke-tom, och
-            #     else-grenen committar som vanligt. Så var det för US retail
+            #   - En enskild stannad serie, om den bevakas per serie. Det är
+            #     US retail (7c per bränsle, 7d räknar dem) och ingen annan, och
+            #     då fäller Refresh data — det här steget körs aldrig, det har
+            #     inget if: always(). Saknas den granulariteten passerar stoppet
+            #     tyst här i stället: övriga serier rör sig, diffen är icke-tom,
+            #     och else-grenen committar som vanligt. Så var det för US retail
             #     fram till 2026-08-25.
-            #   - En enskild stannad SPOT-serie. Verify 16 tar ett tabellbrett
-            #     max över tre series_key, så stannar RWTC ensam håller de andra
-            #     kontrollen färsk och jobbet blir aldrig rött. Se GRÄNS-noten
-            #     vid check 16.
+            #   - En enskild stannad SPOT- eller EU-serie. Båda kontrollerna tar
+            #     ett tabellbrett max: verify 16 över tre series_key, verify 7b
+            #     över hela retail_eu_weekly — 27 länder gånger två bränslen
+            #     gånger med/utan skatt. Stannar RWTC ensam, eller bara arket
+            #     utan skatt, håller de övriga kombinationerna maxet färskt och
+            #     jobbet blir aldrig rött. Per land finns bara verify 3, och den
+            #     är scopad till diesel med skatt. Se GRÄNS-noten vid check 16.
             #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
             #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
             #     samtidigt som de nationella serierna. Se noten vid 7c.

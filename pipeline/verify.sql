@@ -473,9 +473,11 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
 --     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
 --     källa rört sig — den jämför hela site/public/data. De nationella
---     veckoserierna har hårda kontroller i stället: spot här (men bara på
---     hämtningsnivå — se GRÄNS nedan), EU-retail i 7b, US retail i 7c per
---     bränsle (tillagd 2026-08-25, tills dess var den obevakad).
+--     veckoserierna har hårda kontroller i stället, men bara US retail (7c/7d)
+--     mäts per serie. Spot här och EU-retail i 7b mäts båda med ett tabellbrett
+--     max — se GRÄNS nedan, och notera att 7b:s tabell är den bredaste av dem
+--     alla: 27 länder gånger två bränslen gånger med/utan skatt, med check 3 som
+--     enda kontroll per land och den scopad till diesel med skatt.
 --     Regionserierna saknar hård kontroll helt — de hämtas i en egen förfrågan,
 --     så 7c ser dem bara i den mån de stannar samtidigt som de nationella.
 --     Se noten vid 7c.
@@ -489,7 +491,8 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     check 1e:s not säger att built_on finns för att undvika. Det gör också att
 --     PIN_AGE i negative.sh biter här; mot current_date var den verkningslös.
 --
---     GRÄNS SOM ÄR KVAR: max(obs_date) är tabellbrett, och stg.crack_daily bär
+--     GRÄNS SOM ÄR KVAR (gäller 7b likaväl): max(obs_date) är tabellbrett, och
+--     stg.crack_daily bär
 --     tre series_key ur tre oberoende EIA-serier. Stannar RWTC ensam får
 --     us_ulsd_wti en svans av nullor medan us_ulsd_brent håller max färskt, och
 --     varken 13 (hoppar över NULL-ben), 14 eller export-check 9 (jämför längder)

@@ -50,7 +50,8 @@ WITH required_tables(t) AS (
   VALUES ('build_meta'), ('week_calendar'), ('day_axis'), ('eu27'),
          ('spot_daily'), ('legs_weekly'), ('crack_weekly'),
          ('crack_daily'), ('crack_daily_ma'),
-         ('ob_parsed'), ('retail_eu_weekly'), ('retail_us_raw'), ('fx_weekly')
+         ('ob_parsed'), ('retail_eu_weekly'), ('retail_us_raw'),
+         ('retail_us_weekly'), ('region_weekly'), ('fx_weekly')
 ),
 required_columns(t, c) AS (
   VALUES ('build_meta', 'strict'), ('build_meta', 'min_week_obs'), ('build_meta', 'built_on')
@@ -124,7 +125,7 @@ END AS "1d build_meta usable";
 --     --verify-only kör de här invarianterna mot en databas som byggdes en
 --     annan dag, och mot dagens datum hade en helt korrekt axel fällts så fort
 --     kalendern hunnit vidare en vecka. Att datan är gammal är en annan fråga
---     och har egna kontroller (7, 7b, 16).
+--     och har egna kontroller (7, 7b, 7c, 16).
 SELECT CASE
   WHEN (SELECT max(week_start) FROM stg.week_calendar)
        > date_trunc('week', (SELECT built_on FROM stg.build_meta))::DATE
@@ -334,11 +335,20 @@ END AS "7c US retail data fresh"
 --     hållits färskt av den ena medan den andra stannade. Men ett bränsle som
 --     försvinner HELT lämnar ingen grupp kvar för min() att se, och då är 7c
 --     grön igen. Därför den här: bränslena räknas, de mäts inte.
+--
+--     Samma WHERE-villkor som 7c, med flit. Räknade den här obetingat vore
+--     mängderna olika: ett bränsle som finns men bara med NULL-priser lämnar
+--     ingen grupp åt 7c och räknas ändå av 7d, och båda rapporterar grönt.
+--     Onåbart i dag — retail_us_raw filtrerar bort NULL — men det är precis den
+--     sortens filterberoende som filhuvudet säger ska prövas om när ett filter
+--     flyttar.
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
-                 AND (SELECT count(DISTINCT fuel) FROM stg.retail_us_weekly) < 2
+                 AND (SELECT count(DISTINCT fuel) FROM stg.retail_us_weekly
+                      WHERE usd_per_gal IS NOT NULL) < 2
   THEN error(format('verify 7d: US retail is missing a fuel - present: {}',
                     coalesce((SELECT string_agg(DISTINCT fuel, ', ')
-                              FROM stg.retail_us_weekly), 'none')))
+                              FROM stg.retail_us_weekly
+                              WHERE usd_per_gal IS NOT NULL), 'none')))
 END AS "7d US retail covers both fuels"
 ;
 
@@ -459,10 +469,12 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     som slutat leverera — inte för ett bygge som råkat köra i fel ände av
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
 --     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
---     källa rört sig — den jämför hela site/public/data. Varje veckoserie har
---     numera en hård kontroll i stället: spot här, EU-retail i 7b, US retail i
---     7c (tillagd 2026-08-25, tills dess var den obevakad). Kvar utanför båda:
---     en enskild region som slutar rapportera, se noten vid 7c.
+--     källa rört sig — den jämför hela site/public/data. De nationella
+--     veckoserierna har hårda kontroller i stället: spot här, EU-retail i 7b,
+--     US retail i 7c (tillagd 2026-08-25, tills dess var den obevakad).
+--     Regionserierna saknar hård kontroll helt — de hämtas i en egen förfrågan,
+--     så 7c ser dem bara i den mån de stannar samtidigt som de nationella.
+--     Se noten vid 7c.
 --
 --     Grindad på strict av samma skäl som check 7: fixtures är en fryst
 --     ögonblicksbild.

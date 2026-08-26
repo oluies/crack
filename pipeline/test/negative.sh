@@ -315,6 +315,28 @@ expect_fail "crack missing the 42 gal/bbl factor" "verify 5" \
 expect_fail "FX hole in one week" "verify 6" \
   "DELETE FROM stg.fx_weekly WHERE ccy = 'SEK' AND week_start = DATE '2024-03-04';" verify
 
+# Fixtures är en frusen ögonblicksbild medan week_calendar följer byggdagen, så
+# gapet mot dem växer en vecka i veckan. De grindade färskhetskontrollerna börjar
+# därför fälla av sig själva några veckor efter att fixtures gjordes — och de gör
+# det mitt i ett prov som väntar sig en SENARE kontroll, så utfallet blir "failed,
+# but not with verify 7c:" och diagnosen pekar på fel ställe. Mätt 2026-08-26 var
+# marginalen noll veckor kvar: axeln låg på 08-17, check 7:s gap var 14 av 21 och
+# 7c:s 7 av 14, och en byggvecka till hade fällt båda.
+#
+# PIN_AGE flyttar ned axeln OCH byggdagen till fixturedatans egen sista vecka, så
+# att åldern inte kan vara orsaken till att något fäller. Byggdagen måste följa
+# med: check 1e jämför axelns slut med byggveckan, och att bara klippa axeln vore
+# en annan korruption än den provet gäller. Prefixas på de prov som väntar sig en
+# kontroll EFTER 7/7c — de andra fäller på sin egen korruption ändå.
+PIN_AGE="CREATE OR REPLACE TEMP TABLE pin AS
+   SELECT least((SELECT max(week_start) FROM stg.crack_weekly WHERE usd_per_bbl IS NOT NULL),
+                (SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                      FROM stg.retail_us_weekly
+                                      WHERE usd_per_gal IS NOT NULL
+                                      GROUP BY fuel))) AS d;
+ DELETE FROM stg.week_calendar WHERE week_start > (SELECT d FROM pin);
+ UPDATE stg.build_meta SET built_on = (SELECT (d + INTERVAL 6 DAY)::DATE FROM pin);"
+
 # strict lives in build_meta, not in the variable — that is the point of it,
 # so a strict build has to be simulated in the copy rather than in the preamble.
 expect_fail "crack data gone stale (strict build)" "verify 7" \
@@ -324,12 +346,14 @@ expect_fail "crack data gone stale (strict build)" "verify 7" \
 # SRC_DB kommer från --fixtures, alltså strict=false. Utan detta vore de två
 # 7b-proven identiska och 7b aldrig prövad på ett strikt bygge.
 expect_fail "EU retail gone stale (strict build)" "verify 7b" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 # 7b must fire even on a non-strict build: the Oil Bulletin is live in every mode.
 expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
-  "UPDATE stg.build_meta SET strict = false;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 # 7c fanns inte förrän 2026-08-25: US retail var den enda serien utan
@@ -338,7 +362,8 @@ expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
 # fäller på ett strikt bygge, tiger på ett fixtures-bygge, och fäller även när
 # tabellen är HELT tom (max(week_start) NULL -> error(NULL) kastar inte).
 expect_fail "US retail gone stale (strict build)" "verify 7c" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_us_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 expect_pass "US staleness silent on a fixtures build" \
@@ -346,7 +371,8 @@ expect_pass "US staleness silent on a fixtures build" \
    DELETE FROM stg.retail_us_weekly WHERE week_start > DATE '2026-01-01';" verify
 
 expect_fail "retail_us_weekly emptied entirely (error(NULL))" "verify 7c" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_us_weekly;" verify
 
 # Tabellen bär två oberoende EIA-serier. Ett tabellbrett max() hade hållits
@@ -355,14 +381,16 @@ expect_fail "retail_us_weekly emptied entirely (error(NULL))" "verify 7c" \
 # nullor uppfyller. Därför mäter 7c minsta max per bränsle — och därför finns
 # det här provet, som före den ändringen var osynligt för hela sviten.
 expect_fail "only US diesel goes stale (strict build)" "verify 7c" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_us_weekly
     WHERE fuel = 'diesel' AND week_start > DATE '2026-01-01';" verify
 
 # Och ett bränsle som försvinner HELT lämnar ingen grupp för min() att se, så 7c
 # blir grön igen. 7d räknar bränslena i stället för att mäta dem.
 expect_fail "US gasoline series vanishes entirely" "verify 7d" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_us_weekly WHERE fuel = 'gasoline';" verify
 
 expect_pass "missing fuel silent on a fixtures build" \
@@ -437,7 +465,8 @@ expect_fail "a day appears twice on the daily axis" "verify 15" \
 # Dagsserien är där färskhet faktiskt mäts — veckoserien slutar regelmässigt en
 # vecka tidigt av konstruktion, så check 7 kan inte göra det jobbet.
 expect_fail "daily data gone stale (strict build)" "verify 16" \
-  "UPDATE stg.build_meta SET strict = true;
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.crack_daily    WHERE obs_date > DATE '2024-01-01';
    DELETE FROM stg.crack_daily_ma WHERE obs_date > DATE '2024-01-01';" verify
 

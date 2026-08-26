@@ -491,8 +491,7 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     check 1e:s not säger att built_on finns för att undvika. Det gör också att
 --     PIN_AGE i negative.sh biter här; mot current_date var den verkningslös.
 --
---     GRÄNS SOM ÄR KVAR (gäller 7b likaväl): max(obs_date) är tabellbrett, och
---     stg.crack_daily bär
+--     GRÄNS SOM ÄR KVAR: max(obs_date) är tabellbrett, och stg.crack_daily bär
 --     tre series_key ur tre oberoende EIA-serier. Stannar RWTC ensam får
 --     us_ulsd_wti en svans av nullor medan us_ulsd_brent håller max färskt, och
 --     varken 13 (hoppar över NULL-ben), 14 eller export-check 9 (jämför längder)

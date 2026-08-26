@@ -488,11 +488,24 @@ expect_fail "a day appears twice on the daily axis" "verify 15" \
 # FRAMFÖR sin egen axel, ett läge inget bygge kan producera, och 7/7c/7d blir
 # gröna på ett negativt gap i stället för på ett konsekvent gammalt bygge.
 # retail_eu_weekly och fx_weekly lämnas: 7b är ogrindad och läser live-data, och
-# check 6 itererar bara den klippta kalendern.
+# check 6 itererar bara den klippta kalendern. Råtabellerna (spot_daily,
+# retail_us_raw, ob_parsed) lämnas också, och spot_daily är det medvetna valet
+# av två dåliga: klipps den vid samma gräns har veckan som BÖRJAR på cut bara
+# måndagen kvar, alltså en handelsdag mot min_week_obs tre, och check 13 fäller
+# på riggen i stället för på datan — provat, den blir röd. Att i stället flytta
+# veckotabellerna en vecka till hade gjort korruptionen mer omfattande än det
+# den ska visa. Ingen kontroll jämför en råtabells räckvidd mot axeln; den dag
+# någon gör det behöver det här provet skrivas om.
+#
+# Ankaret filtrerar usd_per_bbl IS NOT NULL, precis som check 16. Ofiltrerat
+# skiljer de sig i just det läge repot dokumenterar som stött: med en riktig
+# ICE-gasoilfil når crack_daily fram till idag medan nwe_gasoil_brent är NULL
+# förbi spotdatan, least() väljer då kalendergrenen och klippet slutar bita.
 expect_pass "a database built eight weeks ago still verifies" \
   "CREATE OR REPLACE TEMP TABLE cut AS
      SELECT (least((SELECT max(week_start) FROM stg.week_calendar),
-                   (SELECT date_trunc('week', max(obs_date))::DATE FROM stg.crack_daily))
+                   (SELECT date_trunc('week', max(obs_date))::DATE FROM stg.crack_daily
+                     WHERE usd_per_bbl IS NOT NULL))
              - INTERVAL 56 DAY)::DATE AS d;
    DELETE FROM stg.week_calendar   WHERE week_start > (SELECT d FROM cut);
    DELETE FROM stg.crack_daily     WHERE obs_date   > (SELECT d FROM cut);

@@ -535,6 +535,13 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     (jämför längder) ser det. nwe_gasoil_brent hålls utanför — utan en
 --     licensierad ICE-fil är den NULL i varje bygge, vilket är ett dokumenterat
 --     giltigt läge och inte en stannad serie.
+--
+--     Notera vad undantaget kostar: med tom stub gör predikatet ingenting alls —
+--     usd_per_bbl IS NOT NULL lämnar redan ingen grupp — så det biter bara när
+--     filen ÄR ifylld, alltså i just det läge där en stannad ICE-matning vore en
+--     riktig händelse. Den serien är därmed obevakad med flit. Den är manuell:
+--     den som fyller filen vet när den slutade fyllas, och ett rött bygge för en
+--     fil som ingen lovat uppdatera vore värre än tystnad.
 -- ---------------------------------------------------------------------------
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
                  AND (SELECT built_on FROM stg.build_meta)

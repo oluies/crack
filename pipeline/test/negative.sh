@@ -511,15 +511,20 @@ expect_fail "a day appears twice on the daily axis" "verify 15" \
 # den ska visa. Ingen kontroll jämför en råtabells räckvidd mot axeln; den dag
 # någon gör det behöver det här provet skrivas om.
 #
-# Ankaret filtrerar usd_per_bbl IS NOT NULL, precis som check 16. Ofiltrerat
-# skiljer de sig i just det läge repot dokumenterar som stött: med en riktig
-# ICE-gasoilfil når crack_daily fram till idag medan nwe_gasoil_brent är NULL
-# förbi spotdatan, least() väljer då kalendergrenen och klippet slutar bita.
+# Ankaret speglar check 16:s uttryck: minsta max PER series_key, utan
+# nwe_gasoil_brent. Ett tabellbrett max hade skilt sig från kontrollen i just det
+# läge repot dokumenterar som stött — en ifylld ice_gasoil.csv, som läses i varje
+# läge. ICE settlar dagligen medan EIA:s spot ligger upp till åtta dagar efter,
+# så ankaret hade hängt på gasoildatumet och marginalen mot 16 blivit rörlig i
+# stället för de fasta sex dagarna provet vilar på.
 expect_pass "a database built eight weeks ago still verifies" \
   "CREATE OR REPLACE TEMP TABLE cut AS
      SELECT (least((SELECT max(week_start) FROM stg.week_calendar),
-                   (SELECT date_trunc('week', max(obs_date))::DATE FROM stg.crack_daily
-                     WHERE usd_per_bbl IS NOT NULL))
+                   (SELECT date_trunc('week', min(mx))::DATE
+                    FROM (SELECT max(obs_date) AS mx FROM stg.crack_daily
+                          WHERE usd_per_bbl IS NOT NULL
+                            AND series_key <> 'nwe_gasoil_brent'
+                          GROUP BY series_key)))
              - INTERVAL 56 DAY)::DATE AS d;
    DELETE FROM stg.week_calendar   WHERE week_start > (SELECT d FROM cut);
    DELETE FROM stg.crack_daily     WHERE obs_date   > (SELECT d FROM cut);
@@ -552,6 +557,14 @@ expect_fail "only the WTI crack series goes stale" "verify 16" \
 expect_fail "a US crack series vanishes entirely" "verify 16b" \
   "$PIN_AGE
    UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.crack_daily    WHERE series_key = 'us_ulsd_wti';
+   DELETE FROM stg.crack_daily_ma WHERE series_key = 'us_ulsd_wti';" verify
+
+# Grinden åt andra hållet, samma doktrin som för 7d: en 16b som fällde på ett
+# fixtures-bygge hade rödat varje pull request, och ingenting i sviten hade
+# skilt det från en riktig träff.
+expect_pass "a missing US crack series is silent on a fixtures build" \
+  "UPDATE stg.build_meta SET strict = false;
    DELETE FROM stg.crack_daily    WHERE series_key = 'us_ulsd_wti';
    DELETE FROM stg.crack_daily_ma WHERE series_key = 'us_ulsd_wti';" verify
 

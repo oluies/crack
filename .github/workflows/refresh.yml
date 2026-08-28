@@ -120,9 +120,6 @@ jobs:
             #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
             #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
             #     samtidigt som de nationella serierna. Se noten vid 7c.
-            #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
-            #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
-            #     samtidigt som de nationella serierna. Se noten vid 7c.
             #   - Notifiering. Varningen syns för den som öppnar körningen.
             #     Röda körningar mejlas däremot ut, vilket är den starkare
             #     signalen. För publika repon (detta är ett) stänger GitHub av

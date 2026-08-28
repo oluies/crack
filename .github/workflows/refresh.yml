@@ -105,20 +105,21 @@ jobs:
             # sjudagarssteg och slår till först vid 21: senare, inte tidigare.
             #
             # Vad raden INTE täcker, och det är avsiktligt kvar som ett hål:
-            #   - En enskild stannad serie, om den bevakas per serie. Det är
-            #     US retail (7c per bränsle, 7d räknar dem) och ingen annan, och
-            #     då fäller Refresh data — det här steget körs aldrig, det har
-            #     inget if: always(). Saknas den granulariteten passerar stoppet
-            #     tyst här i stället: övriga serier rör sig, diffen är icke-tom,
-            #     och else-grenen committar som vanligt. Så var det för US retail
-            #     fram till 2026-08-25.
-            #   - En enskild stannad SPOT- eller EU-serie. Båda kontrollerna tar
-            #     ett tabellbrett max: verify 16 över tre series_key, verify 7b
-            #     över hela retail_eu_weekly — 27 länder gånger två bränslen
-            #     gånger med/utan skatt. Stannar RWTC ensam, eller bara arket
-            #     utan skatt, håller de övriga kombinationerna maxet färskt och
-            #     jobbet blir aldrig rött. Per land finns bara verify 3, och den
-            #     är scopad till diesel med skatt. Se GRÄNS-noten vid check 16.
+            #   - En enskild stannad serie fälls numera av verify.sql, inte här:
+            #     spot per series_key (16), EU-retail per (fuel, tax) (7b), US
+            #     retail per bränsle (7c), med 16b/7e/7d som räknar dem så att en
+            #     serie som försvinner helt inte tömmer sin egen mätning. Då
+            #     fäller Refresh data och det här steget körs aldrig — det har
+            #     inget if: always(). Saknades den granulariteten passerade
+            #     stoppet tyst här i stället: övriga serier rör sig, diffen är
+            #     icke-tom, och else-grenen committar som vanligt. Så var det för
+            #     US retail till 2026-08-25 och för spot och EU-retail till
+            #     2026-08-28.
+            #   - Ett enskilt LAND i EU-datan. 7b mäter per familj, inte per
+            #     land, och verify 3 ser bara senaste veckans diesel med skatt.
+            #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
+            #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
+            #     samtidigt som de nationella serierna. Se noten vid 7c.
             #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
             #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
             #     samtidigt som de nationella serierna. Se noten vid 7c.

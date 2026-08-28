@@ -280,11 +280,25 @@ SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true) AND (SELECT
 END AS "7 crack data fresh"
 ;
 
+-- 7b mäter minsta max PER (fuel, tax), inte över hela tabellen. Workbooken bär
+--    fyra oberoende kolumnfamiljer — bensin och diesel, med och utan skatt, i två
+--    ark — och ett tabellbrett max hölls färskt av vilken som helst av dem. Frös
+--    arket "Prices wo taxes" medan diesel-med-skatt fortsatte publicerades den
+--    frusna halvan med en platt svans och ingenting sa till: 7b var grön, verify
+--    3 tittar bara på diesel-med-skatt, och refresh.yml:s nolldiff-varning fäller
+--    bara när ingen källa alls rört sig. Per land är fortfarande ogranskat utom
+--    genom verify 3 — se noten vid 7e.
 SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
-                 - coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly), DATE '1900-01-01') > 14
-  THEN error(format('verify 7b: EU retail data stale - calendar ends {}, last observation {}',
+                 - coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                                  FROM stg.retail_eu_weekly
+                                                  WHERE eur_per_l IS NOT NULL
+                                                  GROUP BY fuel, tax)), DATE '1900-01-01') > 14
+  THEN error(format('verify 7b: EU retail data stale - calendar ends {}, oldest (fuel, tax) ends {}',
                     coalesce((SELECT max(week_start) FROM stg.week_calendar)::VARCHAR, 'none'),
-                    coalesce((SELECT max(week_start) FROM stg.retail_eu_weekly)::VARCHAR, 'none')))
+                    coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
+                                                   FROM stg.retail_eu_weekly
+                                                   WHERE eur_per_l IS NOT NULL
+                                                   GROUP BY fuel, tax))::VARCHAR, 'none')))
 END AS "7b EU retail data fresh"
 ;
 
@@ -353,6 +367,29 @@ SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
                               FROM stg.retail_us_weekly
                               WHERE usd_per_gal IS NOT NULL), 'none')))
 END AS "7d US retail covers both fuels"
+;
+
+-- 7e. Alla fyra (fuel, tax)-familjer finns i EU-datan.
+--
+--     Hör ihop med 7b och står här bara för att bokstäverna ska följa filen.
+--     Samma hål som 7d täcker för 7c: en familj som försvinner HELT lämnar ingen
+--     grupp kvar för 7b:s min(), och då är 7b grön igen. Ogrindad av samma skäl
+--     som 7b — bulletinen hämtas live i varje läge.
+--
+--     KVAR: per land. Ett enskilt land som slutar rapportera flyttar varken
+--     7b:s familjemax eller den här räkningen, och verify 3 ser bara den senaste
+--     veckans diesel-med-skatt. Att vidga 3 till alla fyra familjerna är rätt
+--     åtgärd och en egen ändring: den gör bygget rött den dag ett land lägger
+--     ner en av sina serier, vilket är ett beslut, inte en bugg.
+SELECT CASE WHEN (SELECT count(*) FROM (SELECT DISTINCT fuel, tax
+                                        FROM stg.retail_eu_weekly
+                                        WHERE eur_per_l IS NOT NULL)) < 4
+  THEN error(format('verify 7e: EU retail is missing a (fuel, tax) family - present: {}',
+                    coalesce((SELECT string_agg(f, ', ' ORDER BY f)
+                              FROM (SELECT DISTINCT fuel || '/' || tax AS f
+                                    FROM stg.retail_eu_weekly
+                                    WHERE eur_per_l IS NOT NULL)), 'none')))
+END AS "7e EU retail covers both fuels, taxed and untaxed"
 ;
 
 -- ---------------------------------------------------------------------------
@@ -473,11 +510,11 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     cykeln. Det senare syns i stället som varningen på noll dataändringar i
 --     refresh.yml, som inte stoppar deployen. Den varningen fäller bara när INGEN
 --     källa rört sig — den jämför hela site/public/data. De nationella
---     veckoserierna har hårda kontroller i stället, men bara US retail (7c/7d)
---     mäts per serie. Spot här och EU-retail i 7b mäts båda med ett tabellbrett
---     max — se GRÄNS nedan, och notera att 7b:s tabell är den bredaste av dem
---     alla: 27 länder gånger två bränslen gånger med/utan skatt, med check 3 som
---     enda kontroll per land och den scopad till diesel med skatt.
+--     veckoserierna mäts numera per serie, allihop: spot per series_key här,
+--     EU-retail per (fuel, tax) i 7b, US retail per bränsle i 7c, och 16b/7e/7d
+--     räknar dem så att en serie som försvinner helt inte kan tömma sin egen
+--     mätning. Kvar under den granulariteten: per land i EU-datan, där verify 3
+--     ser den senaste veckans diesel-med-skatt och inget annat.
 --     Regionserierna saknar hård kontroll helt — de hämtas i en egen förfrågan,
 --     så 7c ser dem bara i den mån de stannar samtidigt som de nationella.
 --     Se noten vid 7c.
@@ -491,26 +528,50 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     check 1e:s not säger att built_on finns för att undvika. Det gör också att
 --     PIN_AGE i negative.sh biter här; mot current_date var den verkningslös.
 --
---     GRÄNS SOM ÄR KVAR: max(obs_date) är tabellbrett, och stg.crack_daily bär
---     tre series_key ur tre oberoende EIA-serier. Stannar RWTC ensam får
---     us_ulsd_wti en svans av nullor medan us_ulsd_brent håller max färskt, och
---     varken 13 (hoppar över NULL-ben), 14 eller export-check 9 (jämför längder)
---     ser det. Samma form som det tabellbreda max() som togs bort ur 7c. Rätt
---     åtgärd är minsta max per series_key över US-nycklarna — nwe_gasoil_brent
---     måste hållas utanför, en tom ICE-stub är ett dokumenterat giltigt läge —
---     plus en 7d-liknande räkning för en nyckel som försvinner helt. Inte gjort
---     här: det är en egen ändring med egna prov, inte ett tillägg till den här.
+--     Mäter minsta max PER series_key, inte över tabellen. stg.crack_daily bär
+--     tre nycklar ur tre oberoende EIA-serier: stannar RWTC ensam får
+--     us_ulsd_wti en svans av nullor medan us_ulsd_brent håller ett tabellbrett
+--     max färskt, och varken 13 (hoppar över NULL-ben), 14 eller export-check 9
+--     (jämför längder) ser det. nwe_gasoil_brent hålls utanför — utan en
+--     licensierad ICE-fil är den NULL i varje bygge, vilket är ett dokumenterat
+--     giltigt läge och inte en stannad serie.
 -- ---------------------------------------------------------------------------
 SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
                  AND (SELECT built_on FROM stg.build_meta)
-                     - coalesce((SELECT max(obs_date) FROM stg.crack_daily
-                                 WHERE usd_per_bbl IS NOT NULL),
+                     - coalesce((SELECT min(mx) FROM (SELECT max(obs_date) AS mx
+                                                      FROM stg.crack_daily
+                                                      WHERE usd_per_bbl IS NOT NULL
+                                                        AND series_key <> 'nwe_gasoil_brent'
+                                                      GROUP BY series_key)),
                                 DATE '1900-01-01') > 20
-  THEN error(format('verify 16: daily crack data stale - built {}, last observation {}',
+  THEN error(format('verify 16: daily crack data stale - built {}, oldest series ends {}',
                     coalesce((SELECT built_on FROM stg.build_meta)::VARCHAR, 'none'),
-                    coalesce((SELECT max(obs_date) FROM stg.crack_daily
-                              WHERE usd_per_bbl IS NOT NULL)::VARCHAR, 'none')))
+                    coalesce((SELECT min(mx) FROM (SELECT max(obs_date) AS mx
+                                                   FROM stg.crack_daily
+                                                   WHERE usd_per_bbl IS NOT NULL
+                                                     AND series_key <> 'nwe_gasoil_brent'
+                                                   GROUP BY series_key))::VARCHAR, 'none')))
 END AS "16 daily crack data fresh"
+;
+
+-- 16b. Båda US-nycklarna finns över huvud taget.
+--
+--      Samma hål som 7d och 7e täcker: en series_key som försvinner HELT lämnar
+--      ingen grupp kvar för 16:s min(), och då är 16 grön igen. Räknar nycklar
+--      i stället för att mäta dem. Grindad som 16.
+--
+--      nwe_gasoil_brent räknas inte: den är NULL i varje bygge utan en licensierad
+--      ICE-fil, och det är ett dokumenterat giltigt läge — se data/manual.
+SELECT CASE WHEN coalesce((SELECT strict FROM stg.build_meta), true)
+                 AND (SELECT count(DISTINCT series_key) FROM stg.crack_daily
+                      WHERE usd_per_bbl IS NOT NULL
+                        AND series_key <> 'nwe_gasoil_brent') < 2
+  THEN error(format('verify 16b: a US crack series is missing entirely - present: {}',
+                    coalesce((SELECT string_agg(DISTINCT series_key, ', ')
+                              FROM stg.crack_daily
+                              WHERE usd_per_bbl IS NOT NULL
+                                AND series_key <> 'nwe_gasoil_brent'), 'none')))
+END AS "16b both US crack series present"
 ;
 
 SELECT 'alla invarianter gröna' AS verify;

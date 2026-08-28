@@ -355,6 +355,20 @@ expect_fail "EU retail gone stale (strict build)" "verify 7b" \
    UPDATE stg.build_meta SET strict = true;
    DELETE FROM stg.retail_eu_weekly WHERE week_start > DATE '2026-01-01';" verify
 
+# 7b mäter per (fuel, tax) sedan 2026-08-28. Workbooken bär fyra oberoende
+# kolumnfamiljer och ett tabellbrett max hölls färskt av vilken som helst av dem:
+# frös arket utan skatt medan diesel-med-skatt fortsatte såg 7b ingenting, och
+# verify 3 tittar bara på diesel-med-skatt. Det här provet var osynligt för hela
+# sviten före ändringen. Ingen strict behövs — 7b är ogrindad.
+expect_fail "only the without-tax EU sheet goes stale" "verify 7b" \
+  "DELETE FROM stg.retail_eu_weekly
+    WHERE tax = 'without' AND week_start > DATE '2026-01-01';" verify
+
+# Och en familj som försvinner HELT lämnar ingen grupp för min() att se, så 7b
+# blir grön igen. 7e räknar familjerna i stället för att mäta dem.
+expect_fail "an EU (fuel, tax) family vanishes entirely" "verify 7e" \
+  "DELETE FROM stg.retail_eu_weekly WHERE tax = 'without';" verify
+
 # 7b must fire even on a non-strict build: the Oil Bulletin is live in every mode.
 expect_fail "EU staleness fires on a fixtures build" "verify 7b" \
   "UPDATE stg.build_meta SET strict = false;
@@ -517,6 +531,39 @@ expect_pass "a database built eight weeks ago still verifies" \
    DELETE FROM stg.region_weekly   WHERE week_start > (SELECT d FROM cut);
    UPDATE stg.build_meta SET built_on = (SELECT (d + INTERVAL 6 DAY)::DATE FROM cut),
                              strict   = true;" verify
+
+# Linjalen klipps med i alla tre proven: crack_daily_ma är beräknad UR
+# crack_daily, så en serie som tas bort ur den ena men inte den andra fäller
+# check 14 i stället — 157 MA-punkter mot ett fönster som inte längre finns.
+#
+# 16 mäter per series_key sedan 2026-08-28. stg.crack_daily bär tre nycklar ur
+# tre oberoende EIA-serier, så ett tabellbrett max hölls färskt av us_ulsd_brent
+# medan us_ulsd_wti fick en svans av nullor — RWTC ensam kunde stanna utan att
+# något sa till. PIN_AGE av samma skäl som ovan: provet väntar sig 16, och 7/7c
+# ligger före.
+expect_fail "only the WTI crack series goes stale" "verify 16" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.crack_daily
+    WHERE series_key = 'us_ulsd_wti' AND obs_date > DATE '2026-01-01';
+   DELETE FROM stg.crack_daily_ma
+    WHERE series_key = 'us_ulsd_wti' AND obs_date > DATE '2026-01-01';" verify
+
+expect_fail "a US crack series vanishes entirely" "verify 16b" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.crack_daily    WHERE series_key = 'us_ulsd_wti';
+   DELETE FROM stg.crack_daily_ma WHERE series_key = 'us_ulsd_wti';" verify
+
+# Motsatsen, och den som gör undantaget till mer än en kommentar: utan en
+# licensierad ICE-fil är nwe_gasoil_brent NULL i varje bygge. Det är ett
+# dokumenterat giltigt läge, så varken 16 eller 16b får bry sig om att nyckeln
+# saknas — annars vore fixtures-bygget rött av konstruktion.
+expect_pass "a missing ICE gasoil series is not staleness" \
+  "$PIN_AGE
+   UPDATE stg.build_meta SET strict = true;
+   DELETE FROM stg.crack_daily    WHERE series_key = 'nwe_gasoil_brent';
+   DELETE FROM stg.crack_daily_ma WHERE series_key = 'nwe_gasoil_brent';" verify
 
 expect_fail "daily data gone stale (strict build)" "verify 16" \
   "$PIN_AGE

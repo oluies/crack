@@ -170,7 +170,13 @@ Each assertion fails the run with a message naming what broke.
    the smallest per-fuel maximum, because this table carries two independent EIA
    series and a table-wide `max()` would stay fresh on one while the other
    stalled; check 7d counts the fuels, since a fuel that disappears entirely
-   leaves no group for that minimum to see. The regional series are fetched in a
+   leaves no group for that minimum to see. On 2026-08-28 the same treatment
+   reached the other two: 7b measures EU retail per `(fuel, tax)` with 7e
+   counting the four families, and 16 measures the daily crack per `series_key`
+   with 16b counting them — `nwe_gasoil_brent` excluded, because an absent ICE
+   feed is a documented valid state rather than a stalled series. What is still
+   coarser than one series: a single EU country, seen only by check 3 in the
+   latest with-tax diesel week, and the regional series, which are fetched in a
    separate request and have no freshness check of their own.
    Strictness is recorded in `stg.build_meta` at build time, not read from the
    current invocation: `--verify-only` re-checks a database an earlier run

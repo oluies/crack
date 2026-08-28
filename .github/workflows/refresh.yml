@@ -115,8 +115,6 @@ jobs:
             #     icke-tom, och else-grenen committar som vanligt. Så var det för
             #     US retail till 2026-08-25 och för spot och EU-retail till
             #     2026-08-28.
-            #   - Ett enskilt LAND i EU-datan. 7b mäter per familj, inte per
-            #     land, och verify 3 ser bara senaste veckans diesel med skatt.
             #   - Regionserierna. De hämtas i en egen förfrågan och har ingen
             #     egen färskhetskontroll: 7c ser dem bara i den mån de stannar
             #     samtidigt som de nationella serierna. Se noten vid 7c.

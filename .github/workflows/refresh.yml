@@ -69,8 +69,18 @@ jobs:
           restore-keys: mill-${{ runner.os }}-
 
       - name: Install DuckDB CLI
+        # Pinnad i stallet for releases/latest. DuckDB v2.0.0 bytte assetnamn
+        # fran duckdb_cli-linux-amd64.zip till duckdb-cli-linux-amd64.tar.gz,
+        # sa latest-URL:en ger 404. curl -sL sparade 404-sidan utan att
+        # felkoda och unzip foll med exit 9 ("cannot find zipfile directory"),
+        # vilket fallde CI och den veckovisa datakorningen fran 2026-10-22.
+        #
+        # -f far curl att falla pa 404 direkt, dar felet faktiskt finns.
+        env:
+          DUCKDB_VERSION: v1.5.6
         run: |
-          curl -sL https://github.com/duckdb/duckdb/releases/latest/download/duckdb_cli-linux-amd64.zip -o duckdb.zip
+          set -euo pipefail
+          curl -fsSL "https://github.com/duckdb/duckdb/releases/download/${DUCKDB_VERSION}/duckdb_cli-linux-amd64.zip" -o duckdb.zip
           unzip -q duckdb.zip && sudo mv duckdb /usr/local/bin/ && duckdb --version
 
       # Only on the scheduled/manual path. A push to site/ redeploys the existing

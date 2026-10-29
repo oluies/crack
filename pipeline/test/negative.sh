@@ -304,6 +304,23 @@ expect_fail "EIA retail twice in one week" "verify 2c" \
 expect_fail "an EU-27 member drops out" "verify 3" \
   "DELETE FROM stg.retail_eu_weekly WHERE cc = 'PT';" verify
 
+# Check 3 läste bara diesel med skatt fram till 2026-08-28, en fjärdedel av
+# workbooken. Ett land som slutade rapportera i någon av de tre andra familjerna
+# såg varken 3 (fel familj) eller 7b (mäter per familj, inte per land). Det här
+# provet var osynligt för hela sviten före vidgningen — provet ovan tar bort
+# landet ur alla fyra och hade fällt likadant förut.
+expect_fail "a member drops out of one family only" "verify 3" \
+  "DELETE FROM stg.retail_eu_weekly
+    WHERE cc = 'PT' AND fuel = 'gasoline' AND tax = 'without';" verify
+
+# Och familjerna får ligga en vecka isär: bulletinen fyller inte alltid alla fyra
+# arken samtidigt. Mäts varje familj mot SIN senaste vecka är det inget fel; mot
+# en gemensam senaste vecka hade en normal publiceringsordning larmat.
+expect_pass "one family lagging a week is not a dropout" \
+  "DELETE FROM stg.retail_eu_weekly
+    WHERE fuel = 'gasoline' AND tax = 'without'
+      AND week_start = (SELECT max(week_start) FROM stg.retail_eu_weekly);" verify
+
 # The exchange-rate trap: Oil Bulletin prices are already EUR.
 expect_fail "SE prices divided by an FX rate" "verify 4" \
   "UPDATE stg.retail_eu_weekly SET eur_per_l = eur_per_l / 11.0 WHERE cc = 'SE';" verify

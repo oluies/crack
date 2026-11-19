@@ -194,21 +194,38 @@ SELECT CASE WHEN count(*) > 0
 END AS "2c EIA retail one row per week"
 FROM dup2c;
 
--- 3. All 27 members present in the most recent week that has any EU data.
---    Catches a country quietly dropping out of the workbook.
-SELECT CASE WHEN count(*) > 0
-  THEN error(format('verify 3: {} EU-27 members missing from the latest with-tax diesel week: {}',
-                    count(*), string_agg(cc, ', ' ORDER BY cc)))
-END AS "3 all EU-27 present"
-FROM (
-  SELECT e.cc FROM stg.eu27 e
-  WHERE e.cc NOT IN (
-    SELECT cc FROM stg.retail_eu_weekly
-    WHERE fuel = 'diesel' AND tax = 'with'
-      AND week_start = (SELECT max(week_start) FROM stg.retail_eu_weekly
-                        WHERE fuel = 'diesel' AND tax = 'with')
-  )
+CREATE OR REPLACE TEMP VIEW missing3 AS
+SELECT f.fuel || '/' || f.tax AS fam, e.cc
+FROM (SELECT DISTINCT fuel, tax FROM stg.retail_eu_weekly WHERE eur_per_l IS NOT NULL) f
+CROSS JOIN stg.eu27 e
+WHERE NOT EXISTS (
+  SELECT 1 FROM stg.retail_eu_weekly r
+  WHERE r.fuel = f.fuel AND r.tax = f.tax AND r.cc = e.cc AND r.eur_per_l IS NOT NULL
+    AND r.week_start = (SELECT max(week_start) FROM stg.retail_eu_weekly r2
+                        WHERE r2.fuel = f.fuel AND r2.tax = f.tax AND r2.eur_per_l IS NOT NULL)
 );
+
+-- 3. All 27 members present in the most recent week of EVERY (fuel, tax) family.
+--    Catches a country quietly dropping out of the workbook.
+--
+--    Vidgad 2026-08-28. Kontrollen läste bara diesel med skatt, alltså en
+--    fjärdedel av workbooken, och 7b:s familjemått ser inte enskilda länder: ett
+--    land som slutade rapportera bensin utan skatt föll mellan dem och
+--    publicerades som en platt svans. Varje familj mäts mot SIN senaste vecka,
+--    inte mot en gemensam — familjerna kan ligga en vecka isär utan att det är
+--    ett fel, och att jämföra dem mot samma vecka hade gjort en normal
+--    publiceringsordning till ett larm.
+--
+--    Priset, medvetet taget: den dag ett land lägger ner en av sina fyra serier
+--    blir bygget rött tills någon bestämmer vad som ska hända — inte tyst, som
+--    förut. Det är hela poängen, men det är också ett underhållsåtagande.
+SELECT CASE WHEN count(*) > 0
+  THEN error(format('verify 3: {} (family, member) combination(s) missing from that '
+                    'family''s latest week; first: {}',
+                    count(*), (SELECT string_agg(fam || ' ' || cc, ', ')
+                               FROM (SELECT fam, cc FROM missing3 ORDER BY fam, cc LIMIT 8))))
+END AS "3 all EU-27 present"
+FROM missing3;
 
 -- 4. Swedish with-tax diesel stays in a plausible EUR/L band.
 --    The Oil Bulletin's {CC}_exchange_rate columns are EUR-per-national-unit and
@@ -285,9 +302,9 @@ END AS "7 crack data fresh"
 --    ark — och ett tabellbrett max hölls färskt av vilken som helst av dem. Frös
 --    arket "Prices wo taxes" medan diesel-med-skatt fortsatte publicerades den
 --    frusna halvan med en platt svans och ingenting sa till: 7b var grön, verify
---    3 tittar bara på diesel-med-skatt, och refresh.yml:s nolldiff-varning fäller
---    bara när ingen källa alls rört sig. Per land är fortfarande ogranskat utom
---    genom verify 3 — se noten vid 7e.
+--    3 tittade då bara på diesel-med-skatt, och refresh.yml:s nolldiff-varning
+--    fäller bara när ingen källa alls rört sig. Per land täcks av verify 3, som
+--    sedan 2026-08-28 läser alla fyra familjernas senaste vecka.
 SELECT CASE WHEN (SELECT max(week_start) FROM stg.week_calendar)
                  - coalesce((SELECT min(mx) FROM (SELECT max(week_start) AS mx
                                                   FROM stg.retail_eu_weekly
@@ -376,11 +393,11 @@ END AS "7d US retail covers both fuels"
 --     grupp kvar för 7b:s min(), och då är 7b grön igen. Ogrindad av samma skäl
 --     som 7b — bulletinen hämtas live i varje läge.
 --
---     KVAR: per land. Ett enskilt land som slutar rapportera flyttar varken
---     7b:s familjemax eller den här räkningen, och verify 3 ser bara den senaste
---     veckans diesel-med-skatt. Att vidga 3 till alla fyra familjerna är rätt
---     åtgärd och en egen ändring: den gör bygget rött den dag ett land lägger
---     ner en av sina serier, vilket är ett beslut, inte en bugg.
+--     Per land: varken 7b:s familjemax eller den här räkningen flyttar sig av
+--     ett enskilt land, och det är verify 3:s uppgift. Den lästes bara
+--     diesel-med-skatt fram till 2026-08-28 och läser nu varje familjs senaste
+--     vecka. Följden är avsedd: ett land som lägger ner en av sina fyra serier
+--     gör bygget rött tills någon bestämmer vad som ska hända.
 SELECT CASE WHEN (SELECT count(*) FROM (SELECT DISTINCT fuel, tax
                                         FROM stg.retail_eu_weekly
                                         WHERE eur_per_l IS NOT NULL)) < 4
@@ -513,8 +530,8 @@ FROM (SELECT 1 FROM stg.day_axis GROUP BY obs_date HAVING count(*) > 1);
 --     veckoserierna mäts numera per serie, allihop: spot per series_key här,
 --     EU-retail per (fuel, tax) i 7b, US retail per bränsle i 7c, och 16b/7e/7d
 --     räknar dem så att en serie som försvinner helt inte kan tömma sin egen
---     mätning. Kvar under den granulariteten: per land i EU-datan, där verify 3
---     ser den senaste veckans diesel-med-skatt och inget annat.
+--     mätning. Per land i EU-datan tas av verify 3, som sedan 2026-08-28 läser
+--     alla fyra familjernas senaste vecka. Kvar utan bevakning: regionserierna.
 --     Regionserierna saknar hård kontroll helt — de hämtas i en egen förfrågan,
 --     så 7c ser dem bara i den mån de stannar samtidigt som de nationella.
 --     Se noten vid 7c.

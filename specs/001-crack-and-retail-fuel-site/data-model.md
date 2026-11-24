@@ -174,10 +174,12 @@ Each assertion fails the run with a message naming what broke.
    reached the other two: 7b measures EU retail per `(fuel, tax)` with 7e
    counting the four families, and 16 measures the daily crack per `series_key`
    with 16b counting them — `nwe_gasoil_brent` excluded, because an absent ICE
-   feed is a documented valid state rather than a stalled series. What is still
-   coarser than one series: a single EU country, seen only by check 3 in the
-   latest with-tax diesel week, and the regional series, which are fetched in a
-   separate request and have no freshness check of their own.
+   feed is a documented valid state rather than a stalled series. Check 3, widened the same
+   day, carries the per-country half: all 27 members must appear in the latest
+   week of every `(fuel, tax)` family, each family judged against its own latest
+   week so a normal publication order is not an alarm. What is still coarser than
+   one series: the regional series, fetched in a separate request, with no
+   freshness check of their own.
    Strictness is recorded in `stg.build_meta` at build time, not read from the
    current invocation: `--verify-only` re-checks a database an earlier run
    built, and deriving it from the current mode failed a fixtures build the
